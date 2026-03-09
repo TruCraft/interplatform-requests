@@ -42,7 +42,7 @@ data:extend {
       },
     },
     unit = {
-      count = 200,
+	      count = 2000,
       ingredients = {
         { "automation-science-pack", 1 },
         { "logistic-science-pack", 1 },
