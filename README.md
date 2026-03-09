@@ -4,7 +4,7 @@ A Factorio Space Age mod that adds "Planetary Orbit" as a request source for spa
 
 ## Features
 
-- **New Space Location**: Adds "Planetary Orbit" to the import_from grid of buttons in platform hub requests
+- **New Space Location**: Adds "Planetary Orbit" to the "Import from" grid of buttons in platform hub requests
 - **Robot Delivery Animation**: Watch logistic robots fly between platforms delivering items
 - **Automatic Transfers**: Items are pulled from platform hubs on other platforms at the same orbit
 - **No New Items**: Uses the existing platform hub request system
@@ -113,7 +113,7 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 A: Set a platform hub request and select "Planetary Orbit" from the "Import from" grid of buttons.
 
 **Q: Where is "Planetary Orbit" in the list?**
-A: It appears in the import_from grid of buttons, usually under the "Unsorted" section.
+A: It appears in the "Import from" grid of buttons.
 
 **Q: How do I know it's working?**
 A: You'll see messages like "Interplatform Requests: Sending Xx item from Platform A to Platform B" and you'll see a robot flying between platforms.
