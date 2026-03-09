@@ -2,7 +2,7 @@
 
 ## ✅ ACTIVE AND WORKING
 
-**Current Version**: 0.6.4
+**Current Version**: 0.6.6
 **Status**: Fully functional with robot delivery animations
 **Factorio Version**: 2.0+
 
