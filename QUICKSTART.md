@@ -15,7 +15,7 @@ The Interplatform Requests mod adds "Planetary Orbit" as a request source for sp
 - Robot appears on target platform, delivers items
 
 **New Request Option:**
-- "Planetary Orbit" appears in the import_from grid of buttons
+	- "Planetary Orbit" appears in the "Import from" grid of buttons
 - Select it to request items from other platforms in the same orbit
 
 ---
@@ -106,7 +106,6 @@ The mod works transparently alongside normal planet-to-platform logistics.
 
 **Don't see "Planetary Orbit" in the grid of buttons?**
 - Check the mod is loaded: `/c game.print(game.active_mods["interplatform-requests"])`
-- Look in the "Unsorted" section of the grid of buttons
 - Try reloading: `/c game.reload_mods()`
 
 **Items not transferring?**
