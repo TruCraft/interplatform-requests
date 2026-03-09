@@ -130,6 +130,30 @@ A: Yes! It matches the quality specified in the request.
 **Q: Why don't I see a robot?**
 A: Make sure you're watching the correct platform (the one receiving items). The robot flies TO that platform from off-screen, coming from the opposite direction it flew when leaving the source platform.
 
+## Development & CI
+
+This mod has a GitHub Actions workflow that:
+
+- On **push / pull requests**:
+  - Runs **Stylua** to lint/format all Lua sources.
+  - Builds a ZIP named `<mod_name>_<version>.zip` where `version` comes directly from `info.json`.
+  - Uploads the ZIP as a build artifact.
+- On a **manual release run** (using the "Run workflow" button):
+  - Reads the **major.minor** baseline from `info.json` (e.g. `0.6`).
+  - Looks at existing `vX.Y.Z` tags to find the latest released version.
+  - If major/minor are unchanged, increments the patch; otherwise, starts at patch `0`.
+  - Ensures versions only ever increase (no going backwards unless major/minor increase).
+  - Writes the full `major.minor.patch` into `info.json` for that build only.
+  - Creates and pushes a new tag `v<major.minor.patch>`.
+  - Builds `<mod_name>_<major.minor.patch>.zip` and creates/updates a GitHub Release for that tag with the ZIP attached.
+
+To cut a new release:
+
+1. Update `version` in `info.json` to the desired **major.minor** baseline (e.g. change `0.6` → `0.7` when you want a new minor line).
+2. Commit and push your changes to the default branch (e.g. `main`).
+3. In GitHub → **Actions** → "Build Factorio Mod", click **Run workflow** (targeting `main`).
+4. The workflow will compute the next full version (e.g. `0.6.7` or `0.7.0`), create tag `v<version>`, build the ZIP, and publish/update a GitHub Release with the ZIP attached.
+
 ## License
 
 MIT License - Feel free to modify and distribute
