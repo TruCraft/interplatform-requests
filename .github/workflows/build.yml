@@ -39,14 +39,22 @@ jobs:
       - name: Create mod archive
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p dist build
           ZIP_NAME="${{ steps.meta.outputs.mod_name }}_${{ steps.meta.outputs.mod_version }}"
-          echo "Creating archive: $ZIP_NAME.zip"
-          zip -r "dist/$ZIP_NAME.zip" . \
-            -x \
-              ".git/*" \
-              ".github/*" \
-              "*.psd"
+          MOD_DIR="build/$ZIP_NAME"
+          echo "Preparing mod directory: $MOD_DIR"
+          rm -rf "$MOD_DIR"
+          mkdir -p "$MOD_DIR"
+
+          rsync -a ./ "$MOD_DIR"/ \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'dist' \
+            --exclude 'build' \
+            --exclude '*.psd'
+
+          echo "Creating archive: dist/$ZIP_NAME.zip"
+          (cd build && zip -r "../dist/$ZIP_NAME.zip" "$ZIP_NAME")
 
       - name: Upload mod artifact
         uses: actions/upload-artifact@v4
@@ -163,14 +171,22 @@ jobs:
       - name: Create mod archive
         shell: bash
         run: |
-          mkdir -p dist
+          mkdir -p dist build
           ZIP_NAME="${{ steps.meta.outputs.mod_name }}_${{ steps.meta.outputs.mod_version }}"
-          echo "Creating archive: $ZIP_NAME.zip"
-          zip -r "dist/$ZIP_NAME.zip" . \
-            -x \
-              ".git/*" \
-              ".github/*" \
-              "*.psd"
+          MOD_DIR="build/$ZIP_NAME"
+          echo "Preparing mod directory: $MOD_DIR"
+          rm -rf "$MOD_DIR"
+          mkdir -p "$MOD_DIR"
+
+          rsync -a ./ "$MOD_DIR"/ \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'dist' \
+            --exclude 'build' \
+            --exclude '*.psd'
+
+          echo "Creating archive: dist/$ZIP_NAME.zip"
+          (cd build && zip -r "../dist/$ZIP_NAME.zip" "$ZIP_NAME")
 
       - name: Upload mod artifact
         uses: actions/upload-artifact@v4
