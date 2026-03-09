@@ -1,0 +1,11 @@
+{
+	"name": "interplatform-requests",
+  "version": "0.6.6",
+	"title": "Interplatform Requests",
+  "author": "jatruman",
+  "description": "Adds 'Planetary Orbit' as a request source for space platforms, allowing platforms to request items from other platforms orbiting the same planet",
+  "factorio_version": "2.0",
+  "dependencies": ["base >= 2.0.0", "space-age >= 2.0.0"],
+  "space_travel_required": true
+}
+
