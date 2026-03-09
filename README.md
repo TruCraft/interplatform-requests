@@ -4,7 +4,7 @@ A Factorio Space Age mod that adds "Planetary Orbit" as a request source for spa
 
 ## Features
 
-- **New Space Location**: Adds "Planetary Orbit" to the import_from dropdown in platform hub requests
+- **New Space Location**: Adds "Planetary Orbit" to the import_from grid of buttons in platform hub requests
 - **Robot Delivery Animation**: Watch logistic robots fly between platforms delivering items
 - **Automatic Transfers**: Items are pulled from platform hubs on other platforms at the same orbit
 - **No New Items**: Uses the existing platform hub request system
@@ -27,7 +27,7 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 2. **Open a platform hub** on the platform that needs items
 3. **Click the logistics button** to set requests
 4. **Set a request** for an item (e.g., Iron Plate, minimum: 100)
-5. **Select "Planetary Orbit"** from the "Import from" dropdown
+5. **Select "Planetary Orbit"** from the "Import from" grid of buttons
 6. **Put items in another platform's hub** at the same location
 7. **Watch the robot delivery!** A robot will fly between platforms
 
@@ -110,10 +110,10 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 ## FAQ
 
 **Q: How do I use this mod?**
-A: Set a platform hub request and select "Planetary Orbit" from the "Import from" dropdown.
+A: Set a platform hub request and select "Planetary Orbit" from the "Import from" grid of buttons.
 
 **Q: Where is "Planetary Orbit" in the list?**
-A: It appears in the import_from dropdown, usually under "Unsorted" section.
+A: It appears in the import_from grid of buttons, usually under the "Unsorted" section.
 
 **Q: How do I know it's working?**
 A: You'll see messages like "Interplatform Requests: Sending Xx item from Platform A to Platform B" and you'll see a robot flying between platforms.
@@ -129,6 +129,30 @@ A: Yes! It matches the quality specified in the request.
 
 **Q: Why don't I see a robot?**
 A: Make sure you're watching the correct platform (the one receiving items). The robot flies TO that platform from off-screen, coming from the opposite direction it flew when leaving the source platform.
+
+## Development & CI
+
+This mod has a GitHub Actions workflow that:
+
+- On **push / pull requests**:
+  - Runs **Stylua** to lint/format all Lua sources.
+  - Builds a ZIP named `<mod_name>_<version>.zip` where `version` comes directly from `info.json`.
+  - Uploads the ZIP as a build artifact.
+- On a **manual release run** (using the "Run workflow" button):
+  - Reads the **major.minor** baseline from `info.json` (e.g. `0.6`).
+  - Looks at existing `vX.Y.Z` tags to find the latest released version.
+  - If major/minor are unchanged, increments the patch; otherwise, starts at patch `0`.
+  - Ensures versions only ever increase (no going backwards unless major/minor increase).
+  - Writes the full `major.minor.patch` into `info.json` for that build only.
+  - Creates and pushes a new tag `v<major.minor.patch>`.
+  - Builds `<mod_name>_<major.minor.patch>.zip` and creates/updates a GitHub Release for that tag with the ZIP attached.
+
+To cut a new release:
+
+1. Update `version` in `info.json` to the desired **major.minor** baseline (e.g. change `0.6` → `0.7` when you want a new minor line).
+2. Commit and push your changes to the default branch (e.g. `main`).
+3. In GitHub → **Actions** → "Build Factorio Mod", click **Run workflow** (targeting `main`).
+4. The workflow will compute the next full version (e.g. `0.6.7` or `0.7.0`), create tag `v<version>`, build the ZIP, and publish/update a GitHub Release with the ZIP attached.
 
 ## License
 

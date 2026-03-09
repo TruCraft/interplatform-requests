@@ -1,20 +1,27 @@
 # Interplatform Requests - Changelog
 
-## Version 0.6.4 (Current)
+## Version 0.6.6 (Current)
 
-### Features
-- ✅ "Planetary Orbit" space location in import_from dropdown
+### Summary
+
+0.6.5 and 0.6.6 are small internal / bugfix releases. The current feature set is the
+same as 0.6.4; see the detailed 0.6.4 notes below.
+
+### 0.6.4 Feature Set
+
+#### Features
+- ✅ "Planetary Orbit" space location in import_from grid of buttons
 - ✅ Logistic robot delivery animation (9 seconds)
 - ✅ Smart transfer (only requests difference: requested - current - in_transit)
 - ✅ Prevents duplicate requests
 - ✅ Works alongside vanilla planet-to-platform logistics
 
-### Animation Sequence
+#### Animation Sequence
 1. **Source Platform (3s)**: Robot picks up, then flies off screen in a random direction
 2. **Transit (3s)**: No visible robot (items in transit)
 3. **Target Platform (3s)**: Robot flies in from the opposite direction, hovers, delivers
 
-### Code Cleanup
+#### Code Cleanup
 - Removed unused constants (DELIVERY_TIME, POD_START_OFFSET)
 - Removed unused field (last_check_tick)
 - Removed debug spam
@@ -23,6 +30,18 @@
 ---
 
 ## Version History
+
+### 0.6.6
+- Internal improvements and bug fixes
+- No gameplay-visible changes compared to 0.6.4
+
+### 0.6.5
+- Internal improvements and bug fixes
+- No gameplay-visible changes compared to 0.6.4
+
+### 0.6.4
+- Introduced current logistic robot delivery system and Planetary Orbit features
+- See detailed notes in the section above
 
 ### 0.6.3
 - Slowed down robot flight animation (2 seconds instead of 1)
@@ -71,15 +90,5 @@
 - Only transfers from platform hubs (not other containers)
 - Only transfers to platform hubs
 - Platforms must be at exact same space location
-- One transfer per request per second (performance optimization)
-
----
-
-## Future Ideas
-
-- Transfer from other container types
-- Configurable animation speed
-- Sound effects
-- Statistics tracking
-- Multiple robots for large transfers
+- One transfer per request per second
 
