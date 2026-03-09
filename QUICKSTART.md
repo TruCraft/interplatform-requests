@@ -15,7 +15,7 @@ The Interplatform Requests mod adds "Planetary Orbit" as a request source for sp
 - Robot appears on target platform, delivers items
 
 **New Request Option:**
-- "Planetary Orbit" appears in the import_from dropdown
+- "Planetary Orbit" appears in the import_from grid of buttons
 - Select it to request items from other platforms in the same orbit
 
 ---
@@ -31,7 +31,7 @@ You need 2 platforms orbiting the same planet (e.g., both at Nauvis orbit).
 1. Open the **Platform Hub**
 2. Click the **logistics button** (chest icon)
 3. Add a request: **Iron Plate** (minimum: 100)
-4. **Select "Planetary Orbit"** from the "Import from" dropdown
+4. **Select "Planetary Orbit"** from the "Import from" grid of buttons
 5. Make sure the hub has **less than 100 iron plates**
 
 ### Step 3: Platform B (Provider)
@@ -104,9 +104,9 @@ The mod works transparently alongside normal planet-to-platform logistics.
 
 ## Troubleshooting
 
-**Don't see "Planetary Orbit" in the dropdown?**
+**Don't see "Planetary Orbit" in the grid of buttons?**
 - Check the mod is loaded: `/c game.print(game.active_mods["interplatform-requests"])`
-- Look in the "Unsorted" section of the dropdown
+- Look in the "Unsorted" section of the grid of buttons
 - Try reloading: `/c game.reload_mods()`
 
 **Items not transferring?**

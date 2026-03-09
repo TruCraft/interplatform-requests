@@ -10,7 +10,7 @@ same as 0.6.4; see the detailed 0.6.4 notes below.
 ### 0.6.4 Feature Set
 
 #### Features
-- ✅ "Planetary Orbit" space location in import_from dropdown
+- ✅ "Planetary Orbit" space location in import_from grid of buttons
 - ✅ Logistic robot delivery animation (9 seconds)
 - ✅ Smart transfer (only requests difference: requested - current - in_transit)
 - ✅ Prevents duplicate requests
