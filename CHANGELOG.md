@@ -1,10 +1,23 @@
 # Interplatform Requests - Changelog
 
+## 0.6.5
+
+- Fix issue with newly built platform hubs not being recognized until a manual rescan.
+  Hubs are now periodically rediscovered during normal processing, so missed build events
+  are automatically corrected.
+- Allow players to preconfigure Planetary Orbit imports before researching the technology.
+  The warning popup still appears, but the import setting is no longer cleared.
+- Add CI workflow with StyLua linting and Lua unit tests.
+- Restructure release workflow: automatic releases on push to main, publish to
+  Factorio Mod Portal.
+- Update GitHub Actions to latest versions.
+
 ## 0.6.4
 
 - Increase Interplatform Requests technology cost from 200 to 2000 research units.
 - Automatically rescan and register all existing platform hubs on configuration change
   (fixes servers that previously required a manual `/c remote.call("interplatform-requests", "scan_hubs")`).
+- Fix bug with platforms not being registered in pre-existing game saves.
 - Documentation cleanup for Planetary Orbit import option location ("Import from" grid wording, removed outdated
   "Unsorted" references).
 
