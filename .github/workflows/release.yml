@@ -6,6 +6,7 @@ on:
 
 jobs:
   release:
+    if: github.repository == 'TruCraft/interplatform-requests'
     runs-on: ubuntu-latest
     permissions:
       contents: write
