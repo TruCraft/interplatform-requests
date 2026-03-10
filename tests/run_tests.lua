@@ -5,7 +5,11 @@ local failures = 0
 
 local function assert_equal(actual, expected, message)
   if actual ~= expected then
-    error((message or "values are not equal") .. string.format(" (expected %s, got %s)", tostring(expected), tostring(actual)), 2)
+    error(
+      (message or "values are not equal")
+        .. string.format(" (expected %s, got %s)", tostring(expected), tostring(actual)),
+      2
+    )
   end
 end
 
@@ -19,9 +23,9 @@ local function test(name, fn)
   io.stdout:write("TEST " .. name .. " ... ")
   local ok, err = pcall(fn)
   if ok then
-    io.stdout:write("OK\n")
+    io.stdout:write "OK\n"
   else
-    io.stdout:write("FAIL\n")
+    io.stdout:write "FAIL\n"
     io.stderr:write("  " .. tostring(err) .. "\n")
     failures = failures + 1
   end
@@ -99,7 +103,7 @@ function remote.add_interface(name, iface)
 end
 
 -- Load the actual mod control script in this stubbed environment.
-dofile("control.lua")
+dofile "control.lua"
 
 -- ---------------------------------------------------------------------------
 -- Tests for for_each_planetary_orbit_item_request
@@ -113,7 +117,11 @@ test("for_each_planetary_orbit_item_request filters and invokes callback", funct
     sections = {
       {
         filters = {
-          { value = { type = "item", name = "iron-plate" }, import_from = planetary_proto, min = 10 },
+          {
+            value = { type = "item", name = "iron-plate" },
+            import_from = planetary_proto,
+            min = 10,
+          },
           { value = { type = "item", name = "copper-plate" }, import_from = nil, min = 5 },
         },
       },
@@ -125,15 +133,18 @@ test("for_each_planetary_orbit_item_request filters and invokes callback", funct
     },
   }
 
-  for_each_planetary_orbit_item_request(logistic_point, function(filter, section, section_index, filter_index, proto)
-    table.insert(calls, {
-      item = filter.value.name,
-      section_index = section_index,
-      filter_index = filter_index,
-      proto = proto,
-    })
-    return false
-  end)
+  for_each_planetary_orbit_item_request(
+    logistic_point,
+    function(filter, section, section_index, filter_index, proto)
+      table.insert(calls, {
+        item = filter.value.name,
+        section_index = section_index,
+        filter_index = filter_index,
+        proto = proto,
+      })
+      return false
+    end
+  )
 
   assert_equal(#calls, 1, "expected exactly one matching filter")
   assert_equal(calls[1].item, "iron-plate", "expected to see iron-plate request")
@@ -149,8 +160,16 @@ test("for_each_planetary_orbit_item_request stops when callback returns true", f
     sections = {
       {
         filters = {
-          { value = { type = "item", name = "iron-plate" }, import_from = planetary_proto, min = 10 },
-          { value = { type = "item", name = "steel-plate" }, import_from = planetary_proto, min = 15 },
+          {
+            value = { type = "item", name = "iron-plate" },
+            import_from = planetary_proto,
+            min = 10,
+          },
+          {
+            value = { type = "item", name = "steel-plate" },
+            import_from = planetary_proto,
+            min = 15,
+          },
         },
       },
     },
@@ -216,7 +235,11 @@ test("scan_all_hubs initializes storage and registers hubs on platform surfaces"
   -- And the two hubs on the platform surface should have been registered
   assert_true(storage.monitored_hubs[1] ~= nil, "hub 1 should be registered")
   assert_true(storage.monitored_hubs[2] ~= nil, "hub 2 should be registered")
-  assert_equal(storage.monitored_hubs[1].platform, platform, "hub platform should match surface.platform")
+  assert_equal(
+    storage.monitored_hubs[1].platform,
+    platform,
+    "hub platform should match surface.platform"
+  )
 end)
 
 test("script.on_init handler is registered and initializes storage", function()
@@ -229,9 +252,18 @@ test("script.on_init handler is registered and initializes storage", function()
   script._on_init()
 
   assert_true(storage.monitored_hubs ~= nil, "monitored_hubs should be initialized on on_init")
-  assert_true(storage.active_deliveries ~= nil, "active_deliveries should be initialized on on_init")
-  assert_true(storage.request_directions ~= nil, "request_directions should be initialized on on_init")
-  assert_true(storage.viewed_hub_by_player ~= nil, "viewed_hub_by_player should be initialized on on_init")
+  assert_true(
+    storage.active_deliveries ~= nil,
+    "active_deliveries should be initialized on on_init"
+  )
+  assert_true(
+    storage.request_directions ~= nil,
+    "request_directions should be initialized on on_init"
+  )
+  assert_true(
+    storage.viewed_hub_by_player ~= nil,
+    "viewed_hub_by_player should be initialized on on_init"
+  )
   assert_true(storage.request_status ~= nil, "request_status should be initialized on on_init")
 end)
 
@@ -263,7 +295,7 @@ test("create_cinematic_robot falls back to logistic robot when custom creation f
   function surface.create_entity(def)
     table.insert(calls, def.name)
     if def.name == "interplatform-delivery-robot" then
-      error("no such entity")
+      error "no such entity"
     else
       return { valid = true, name = def.name }
     end
@@ -284,7 +316,7 @@ test("create_cinematic_robot returns nil when both creations fail", function()
 
   function surface.create_entity(def)
     table.insert(calls, def.name)
-    error("all creations fail")
+    error "all creations fail"
   end
 
   local robot = create_cinematic_robot(surface, { 2, 2 }, { name = "test-force" })
@@ -303,5 +335,5 @@ if failures > 0 then
   io.stderr:write(string.format("\n%d test(s) failed\n", failures))
   os.exit(1)
 else
-  io.stdout:write("\nAll tests passed\n")
+  io.stdout:write "\nAll tests passed\n"
 end

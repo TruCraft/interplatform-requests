@@ -4,10 +4,10 @@ data:extend {
   {
     type = "planet",
     name = "planetary-orbit",
-	    icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
-	    icon_size = 64,
-	    order = "z[planetary-orbit]",
-	    subgroup = "planets",
+    icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
+    icon_size = 64,
+    order = "z[planetary-orbit]",
+    subgroup = "planets",
     distance = 0, -- At the center (no distance from sun)
     orientation = 0, -- Required field - angle in relation to the sun
     gravity_pull = 0,
@@ -42,7 +42,7 @@ data:extend {
       },
     },
     unit = {
-	      count = 2000,
+      count = 2000,
       ingredients = {
         { "automation-science-pack", 1 },
         { "logistic-science-pack", 1 },
