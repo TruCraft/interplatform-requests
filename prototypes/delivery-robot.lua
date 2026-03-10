@@ -1,11 +1,11 @@
 -- Custom cinematic delivery robot used for interplatform transfer animation
 
 data:extend {
-	  {
-	    type = "simple-entity-with-force",
-	    name = "interplatform-delivery-robot",
-	    icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
-	    icon_size = 64,
+  {
+    type = "simple-entity-with-force",
+    name = "interplatform-delivery-robot",
+    icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
+    icon_size = 64,
     flags = { "placeable-off-grid", "not-on-map" },
     selectable_in_game = false,
     is_military_target = false,

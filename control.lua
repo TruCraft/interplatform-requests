@@ -62,17 +62,17 @@ script.on_init(function()
 end)
 
 script.on_configuration_changed(function()
-	  init_storage()
-	  debug_print "Interplatform Requests: Configuration changed, re-initialized storage"
+  init_storage()
+  debug_print "Interplatform Requests: Configuration changed, re-initialized storage"
 
-	  -- When the mod or its dependencies change (including game version
-	  -- upgrades on a server), make sure we (re)discover all existing
-	  -- platform hubs so cross-platform transfers start working without
-	  -- requiring a manual /remote.call("interplatform-requests", "scan_hubs").
-	  if scan_all_hubs then
-	    scan_all_hubs()
-	  end
-	end)
+  -- When the mod or its dependencies change (including game version
+  -- upgrades on a server), make sure we (re)discover all existing
+  -- platform hubs so cross-platform transfers start working without
+  -- requiring a manual /remote.call("interplatform-requests", "scan_hubs").
+  if scan_all_hubs then
+    scan_all_hubs()
+  end
+end)
 
 -- Register platform hubs
 local function register_hub(entity)
