@@ -659,6 +659,12 @@ local function on_logistic_slot_changed(event)
 
   -- If the player is trying to configure a request that imports from
   -- Planetary Orbit before the tech is researched, show a warning popup.
+  --
+  -- Previously this also *cleared* the import_from setting so that the
+  -- selection "didn't stick" until the tech was researched. That turned out
+  -- to be unfriendly because players often want to preconfigure their hubs
+  -- before unlocking the technology. Now we only show the warning and leave
+  -- the import settings unchanged.
   local player = game.get_player(event.player_index)
   if player then
     local force = entity.force
@@ -677,28 +683,18 @@ local function on_logistic_slot_changed(event)
             local found = false
             for _, section in ipairs(sections) do
               if section and section.filters then
-                local filters = section.filters
-                local changed = false
-
-                for _, filter in ipairs(filters) do
+                for _, filter in ipairs(section.filters) do
                   if
                     filter
                     and filter.import_from
                     and filter.import_from == planetary_orbit_proto
                   then
-                    -- Clear the pre-tech Planetary Orbit import so selecting
-                    -- it in the GUI effectively "doesn't stick" until the
-                    -- technology is researched.
-                    filter.import_from = nil
-                    changed = true
                     found = true
+                    break
                   end
                 end
-
-                if changed then
-                  -- Writing the modified filters table back is required for
-                  -- the game to persist the change to the hub's settings.
-                  section.filters = filters
+                if found then
+                  break
                 end
               end
             end
@@ -802,14 +798,20 @@ end
 local function process_hub_requests()
   init_storage()
 
-  -- If we don't have any hubs registered yet (for example, when the mod was
-  -- added to an existing save), scan all existing hubs once so that
-  -- cross-platform transfers actually run without requiring a manual remote
-  -- call.
-  if not next(storage.monitored_hubs) then
-    if scan_all_hubs then
-      scan_all_hubs()
-    end
+  -- Keep the list of monitored hubs up-to-date.
+  --
+  -- In theory, new hubs should always be registered via build events
+  -- (on_built_entity / on_robot_built_entity / on_space_platform_built_entity),
+  -- but in practice some edge cases on servers meant newly created hubs
+  -- wouldn't be picked up until the player manually ran
+  -- /c remote.call("interplatform-requests", "scan_hubs").
+  --
+  -- To make this robust, we simply rescan for hubs any time the periodic
+  -- processing runs. This is cheap (platform hubs are rare) and ensures that
+  -- any hubs missed by build events are discovered automatically within at
+  -- most SCAN_INTERVAL ticks.
+  if scan_all_hubs then
+    scan_all_hubs()
   end
 
   for unit_number, hub_data in pairs(storage.monitored_hubs) do
