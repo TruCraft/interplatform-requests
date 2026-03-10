@@ -1,72 +1,11 @@
-name: Build Factorio Mod
+name: Release & Publish
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-  workflow_dispatch:
+    branches: [main]
 
 jobs:
-  build:
-    # CI build for pushes and pull requests (no tagging or releases)
-    if: github.event_name == 'push' || github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Lint Lua with Stylua
-        uses: JohnnyMorganz/stylua-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
-          args: .
-
-      - name: Read mod metadata from info.json
-        id: meta
-        shell: bash
-        run: |
-          python - << 'PY' >> "$GITHUB_OUTPUT"
-          import json, pathlib
-
-          info = json.loads(pathlib.Path('info.json').read_text())
-          ver = str(info.get('version', '0.0'))
-          print(f"mod_name={info['name']}")
-          print(f"mod_version={ver}")
-          PY
-
-      - name: Create mod archive
-        shell: bash
-        run: |
-          mkdir -p dist build
-          ZIP_NAME="${{ steps.meta.outputs.mod_name }}_${{ steps.meta.outputs.mod_version }}"
-          MOD_DIR="build/$ZIP_NAME"
-          echo "Preparing mod directory: $MOD_DIR"
-          rm -rf "$MOD_DIR"
-          mkdir -p "$MOD_DIR"
-
-          rsync -a ./ "$MOD_DIR"/ \
-            --exclude '.git' \
-            --exclude '.github' \
-            --exclude 'dist' \
-            --exclude 'build' \
-            --exclude '*.psd'
-
-          echo "Creating archive: dist/$ZIP_NAME.zip"
-          (cd build && zip -r "../dist/$ZIP_NAME.zip" "$ZIP_NAME")
-
-      - name: Upload mod artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.meta.outputs.mod_name }}_${{ steps.meta.outputs.mod_version }}
-          path: dist/*.zip
-
   release:
-    # Manual release job, run via the "Run workflow" button.
-    # Computes the next semantic version from existing tags and info.json,
-    # creates a tag, builds the ZIP, and creates/updates a GitHub Release.
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -79,6 +18,21 @@ jobs:
 
       - name: Fetch tags
         run: git fetch --tags --force
+
+      - name: Lint Lua with Stylua
+        uses: JohnnyMorganz/stylua-action@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          version: latest
+          args: .
+
+      - name: Install Lua 5.4 (for unit tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+
+      - name: Run Lua unit tests
+        run: lua5.4 tests/run_tests.lua
 
       - name: Determine next version from tags and info.json
         id: meta
@@ -161,13 +115,6 @@ jobs:
           print(f"tag_name=v{new_ver}")
           PY
 
-      - name: Lint Lua with Stylua
-        uses: JohnnyMorganz/stylua-action@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          version: latest
-          args: .
-
       - name: Create mod archive
         shell: bash
         run: |
@@ -183,6 +130,7 @@ jobs:
             --exclude '.github' \
             --exclude 'dist' \
             --exclude 'build' \
+            --exclude 'tests' \
             --exclude '*.psd'
 
           echo "Creating archive: dist/$ZIP_NAME.zip"
@@ -200,3 +148,11 @@ jobs:
           tag_name: ${{ steps.meta.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
           files: dist/${{ steps.meta.outputs.mod_name }}_${{ steps.meta.outputs.mod_version }}.zip
+
+      - name: Upload to Factorio Mod Portal
+        uses: mchangrh/factorio-mod-upload@v2
+        with:
+          mod-name: interplatform-requests
+        env:
+          FACTORIO_MODS_TOKEN: ${{ secrets.FACTORIO_TOKEN }}
+          FILENAME: dist/${{ steps.meta.outputs.mod_name }}_${{ steps.meta.outputs.mod_version }}.zip

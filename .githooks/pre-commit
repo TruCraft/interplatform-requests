@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Pre-commit hook: style checks for Lua and JSON files
+
+set -euo pipefail
+
+# Get staged files (excluding deleted files)
+staged_lua=$(git diff --cached --name-only --diff-filter=d -- '*.lua') || true
+staged_json=$(git diff --cached --name-only --diff-filter=d -- '*.json') || true
+
+exit_code=0
+
+# Check Lua formatting with StyLua
+if [ -n "$staged_lua" ]; then
+  if command -v stylua &>/dev/null; then
+    echo "Checking Lua formatting..."
+    if ! stylua --check $staged_lua; then
+      echo "Lua formatting issues found. Run 'stylua .' to fix."
+      exit_code=1
+    fi
+  else
+    echo "Warning: stylua not found, skipping Lua style check"
+  fi
+fi
+
+# Validate JSON syntax
+if [ -n "$staged_json" ]; then
+  echo "Validating JSON..."
+  for f in $staged_json; do
+    if ! python3 -m json.tool "$f" >/dev/null 2>&1; then
+      echo "Invalid JSON: $f"
+      exit_code=1
+    fi
+  done
+fi
+
+exit $exit_code
