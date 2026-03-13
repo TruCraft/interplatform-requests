@@ -1,6 +1,14 @@
 # Interplatform Requests - Changelog
 
-## 0.6.5
+## 0.6.7
+
+- Replace robot-based delivery animation with cargo pods for item transfers between platforms.
+- Remove custom delivery robot prototype and cinematic robot code.
+- Add status panel anchored to the hub GUI showing pending interplatform requests.
+- Release workflow now only triggers on code/graphics changes, skipping doc-only updates.
+- Add auto-merge workflow for PRs that pass CI.
+
+## 0.6.6
 
 - Fix issue with newly built platform hubs not being recognized until a manual rescan.
   Hubs are now periodically rediscovered during normal processing, so missed build events
@@ -12,7 +20,7 @@
   Factorio Mod Portal.
 - Update GitHub Actions to latest versions.
 
-## 0.6.4
+## 0.6.5
 
 - Increase Interplatform Requests technology cost from 200 to 2000 research units.
 - Automatically rescan and register all existing platform hubs on configuration change
@@ -21,7 +29,7 @@
 - Documentation cleanup for Planetary Orbit import option location ("Import from" grid wording, removed outdated
   "Unsorted" references).
 
-## 0.6.3 - Initial release
+## 0.6.4 - Initial release
 
 - First public release of Interplatform Requests.
 - Adds the **Planetary Orbit** space location as a request source in the platform hub "Import from" grid.
