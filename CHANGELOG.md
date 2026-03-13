@@ -1,5 +1,16 @@
 # Interplatform Requests - Changelog
 
+## 0.6.8
+
+- Add per-hub item reserve system: reserve items on a hub so they won't be sent to other platforms.
+- Reserves UI integrated into the status panel with choose-elem-button item pickers.
+- Left-click a reserve icon to change the item, right-click to remove it.
+- Reserve amounts save automatically as you type (no confirm button needed).
+- Already-reserved items are filtered out of the item picker to prevent duplicates.
+- Status panel "Available" column now accounts for reserves on source hubs.
+- Transfer logic respects reserves — reserved items are never sent to other platforms.
+- Add info icon next to Reserves header with usage instructions tooltip.
+
 ## 0.6.7
 
 - Replace robot-based delivery animation with cargo pods for item transfers between platforms.
