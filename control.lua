@@ -276,19 +276,32 @@ local function on_hub_gui_opened(event)
   end
 
   -- Clear any previous status panel for this player
-  if player.gui.left.platform_requests_status then
-    player.gui.left.platform_requests_status.destroy()
+  if player.gui.relative.platform_requests_status then
+    player.gui.relative.platform_requests_status.destroy()
   end
 
   local platform_name = (platform and platform.valid and platform.name) or "(unknown platform)"
 
-  local frame = player.gui.left.add {
+  local anchor = {
+    gui = defines.relative_gui_type.space_platform_hub_gui,
+    position = defines.relative_gui_position.left,
+  }
+
+  local frame = player.gui.relative.add {
     type = "frame",
     name = "platform_requests_status",
     direction = "vertical",
-    caption = { "", "Interplatform Requests: ", platform_name },
+    anchor = anchor,
+    caption = "Interplatform Requests",
   }
-  local inner = frame.add { type = "flow", direction = "vertical", name = "content" }
+
+  local flow = frame.add { type = "flow", direction = "vertical", name = "content" }
+
+  local innerFrame = flow.add {
+    type = "frame",
+    style = "entity_frame",
+    direction = "vertical",
+  }
 
   -- We'll create the table lazily only if there is at least one row to show.
   local status_table = nil
@@ -387,7 +400,7 @@ local function on_hub_gui_opened(event)
         -- time we have something to show, so it doesn't appear when
         -- there are no pending or in-transit items.
         if not status_table then
-          status_table = inner.add {
+          status_table = innerFrame.add {
             type = "table",
             name = "platform_requests_status_table",
             column_count = 11,
@@ -530,7 +543,7 @@ local function on_hub_gui_opened(event)
   end
 
   if not any_missing then
-    inner.add {
+    flow.add {
       type = "label",
       caption = "All planetary-orbit imports satisfied",
     }
