@@ -3,12 +3,6 @@
 
 -- Constants
 local SCAN_INTERVAL = 60 -- Check every 60 ticks (1 second)
-local ROBOT_OFFSCREEN_DISTANCE = 64 -- Distance in tiles for robots to travel beyond typical camera visibility
-local ROBOT_TICKS_PER_TILE = 4 -- Original speed: 30 tiles over 120 ticks -> 4 ticks per tile
-local ROBOT_TRAVEL_TICKS = ROBOT_OFFSCREEN_DISTANCE * ROBOT_TICKS_PER_TILE
-local ROBOT_HOVER_TICKS_SOURCE = 60
-local ROBOT_HOVER_TICKS_TARGET = 60
-local ROBOT_TRANSIT_TICKS = 180
 local REQUEST_COMPLETED_DISPLAY_TICKS = 120 -- How long to show a just-completed request
 local MAX_CONCURRENT_TRANSFERS = 5 -- Maximum number of active inter-platform transfers per hub at once
 
@@ -36,9 +30,6 @@ local function init_storage()
   end
   if not storage.active_deliveries then
     storage.active_deliveries = {}
-  end
-  if not storage.request_directions then
-    storage.request_directions = {}
   end
   if not storage.viewed_hub_by_player then
     storage.viewed_hub_by_player = {}
@@ -91,9 +82,6 @@ end
 local function unregister_hub(entity)
   if entity and entity.unit_number then
     storage.monitored_hubs[entity.unit_number] = nil
-    if storage and storage.request_directions then
-      storage.request_directions[entity.unit_number] = nil
-    end
   end
 end
 
@@ -946,50 +934,28 @@ local function process_hub_requests()
                 return false
               end
 
-              -- Create a robot to deliver the items (custom visual if available)
+              -- Launch a cargo pod from the source hub to the target platform
               local source_platform = source_hub.surface.platform
-              local robot =
-                create_cinematic_robot(source_hub.surface, source_hub.position, hub.force)
+              local pod = source_hub.create_cargo_pod()
 
-              if robot and robot.valid then
-                -- Choose a stable direction per hub and space location so that all deliveries to
-                -- this hub share the same path until the hub leaves and returns to a different
-                -- location.
-                local dir_x, dir_y
+              if pod then
+                pod.cargo_pod_destination = {
+                  type = defines.cargo_destination.surface,
+                  surface = hub.surface,
+                  transform_launch_products = false,
+                }
 
-                if storage and storage.request_directions then
-                  local stored = storage.request_directions[hub.unit_number]
-                  if
-                    stored
-                    and stored.x
-                    and stored.y
-                    and stored.space_location == platform.space_location
-                  then
-                    dir_x, dir_y = stored.x, stored.y
-                  end
-                end
-
-                if not dir_x or not dir_y then
-                  local angle = math.random() * 2 * math.pi
-                  dir_x = math.cos(angle)
-                  dir_y = math.sin(angle)
-
-                  if dir_x == 0 and dir_y == 0 then
-                    dir_x, dir_y = 1, 0
-                  end
-
-                  if storage and storage.request_directions then
-                    storage.request_directions[hub.unit_number] = {
-                      x = dir_x,
-                      y = dir_y,
-                      space_location = platform.space_location,
-                    }
-                  end
+                local pod_inventory = pod.get_inventory(defines.inventory.cargo_unit)
+                if pod_inventory then
+                  pod_inventory.insert {
+                    name = item_name,
+                    quality = quality_name,
+                    count = removed,
+                  }
                 end
 
                 table.insert(storage.active_deliveries, {
-                  pickup_robot = robot,
-                  delivery_robot = nil, -- Will be created later on target platform
+                  cargo_pod = pod,
                   source_hub = source_hub,
                   target_hub = hub,
                   target_platform = platform,
@@ -998,9 +964,6 @@ local function process_hub_requests()
                   item_name = item_name,
                   quality_name = quality_name,
                   count = removed,
-                  phase = "pickup", -- pickup, transit, deliver
-                  direction_x = dir_x,
-                  direction_y = dir_y,
                 })
 
                 active_delivery_count = active_delivery_count + 1
@@ -1008,7 +971,7 @@ local function process_hub_requests()
 
                 debug_print(
                   string.format(
-                    "Interplatform Requests: Sending %dx %s from %s to %s",
+                    "Interplatform Requests: Sending %dx %s from %s to %s via cargo pod",
                     removed,
                     item_name,
                     source_platform.name,
@@ -1018,7 +981,7 @@ local function process_hub_requests()
 
                 refresh_status_for_hub(hub)
               else
-                -- Fallback: instant transfer if robot creation fails
+                -- Fallback: instant transfer if cargo pod creation fails
                 hub_inventory.insert {
                   name = item_name,
                   quality = quality_name,
@@ -1049,57 +1012,7 @@ local function process_hub_requests()
   end
 end
 
--- Resolve the movement direction for a delivery (normalized 2D vector)
-local function get_delivery_direction(delivery)
-  -- New format: explicit x/y components
-  local dx = delivery.direction_x
-  local dy = delivery.direction_y
-  if dx and dy and (dx ~= 0 or dy ~= 0) then
-    -- Normalize to ensure constant speed regardless of direction
-    local len_sq = dx * dx + dy * dy
-    if len_sq > 0 then
-      local len = math.sqrt(len_sq)
-      return dx / len, dy / len
-    end
-  end
-
-  -- Backwards compatibility: old format used a scalar horizontal direction
-  local old_dir = delivery.direction
-  if type(old_dir) == "number" and old_dir ~= 0 then
-    return old_dir, 0
-  end
-
-  -- Default to moving to the right
-  return 1, 0
-end
-
--- Create a visual delivery robot, falling back to the vanilla logistic robot
--- if the custom prototype is not available or fails to spawn.
-function create_cinematic_robot(surface, position, force)
-  -- Try custom delivery robot first
-  local ok, entity = pcall(surface.create_entity, {
-    name = "interplatform-delivery-robot",
-    position = position,
-    force = force,
-  })
-  if ok and entity and entity.valid then
-    return entity
-  end
-
-  -- Fallback: vanilla logistic robot
-  local ok2, entity2 = pcall(surface.create_entity, {
-    name = "logistic-robot",
-    position = position,
-    force = force,
-  })
-  if ok2 and entity2 and entity2.valid then
-    return entity2
-  end
-
-  return nil
-end
-
--- Process active deliveries
+-- Clean up completed cargo pod deliveries
 local function process_deliveries()
   init_storage()
 
@@ -1112,141 +1025,30 @@ local function process_deliveries()
 
     if not delivery then
       table.remove(storage.active_deliveries, i)
-      goto continue
+    elseif not delivery.cargo_pod or not delivery.cargo_pod.valid then
+      -- Cargo pod has landed and been consumed; delivery is complete
+      debug_print(
+        string.format(
+          "Interplatform Requests: Delivered %dx %s to %s",
+          delivery.count,
+          delivery.item_name,
+          delivery.target_platform
+              and delivery.target_platform.valid
+              and delivery.target_platform.name
+            or "(unknown)"
+        )
+      )
+      table.remove(storage.active_deliveries, i)
+      refresh_status_for_hub(delivery.target_hub)
     end
-
-    local elapsed = game.tick - delivery.start_tick
-
-    if delivery.phase == "pickup" then
-      -- Robot is picking up items from source hub and flying off screen
-      if delivery.pickup_robot and delivery.pickup_robot.valid then
-        local source_pos = delivery.source_hub.position
-        local bob = math.sin(game.tick / 10) * 0.2
-
-        if elapsed < ROBOT_HOVER_TICKS_SOURCE then
-          -- Hover at source hub before departing (with subtle bobbing)
-          delivery.pickup_robot.teleport { source_pos.x, source_pos.y + bob }
-        else
-          -- Fly off in a random direction away from the hub
-          local progress = (elapsed - ROBOT_HOVER_TICKS_SOURCE) / ROBOT_TRAVEL_TICKS
-          local dir_x, dir_y = get_delivery_direction(delivery)
-          local new_x = source_pos.x + progress * ROBOT_OFFSCREEN_DISTANCE * dir_x
-          local new_y = source_pos.y + progress * ROBOT_OFFSCREEN_DISTANCE * dir_y + bob
-          delivery.pickup_robot.teleport { new_x, new_y }
-        end
-      end
-
-      -- After hover + travel, destroy pickup robot and switch to transit
-      if elapsed >= (ROBOT_HOVER_TICKS_SOURCE + ROBOT_TRAVEL_TICKS) then
-        if delivery.pickup_robot and delivery.pickup_robot.valid then
-          delivery.pickup_robot.destroy()
-        end
-        delivery.phase = "transit"
-        delivery.transit_start_tick = game.tick
-      end
-    elseif delivery.phase == "transit" then
-      -- Items are "in transit" between platforms (no visible robot)
-      local transit_elapsed = game.tick - delivery.transit_start_tick
-      local transit_time = ROBOT_TRANSIT_TICKS
-
-      if transit_elapsed >= transit_time then
-        -- Create delivery robot on target platform, coming from the opposite direction
-        local dir_x, dir_y = get_delivery_direction(delivery)
-        local arrival_x = -dir_x
-        local arrival_y = -dir_y
-
-        local target_pos = delivery.target_hub.position
-        local spawn_pos = {
-          target_pos.x + ROBOT_OFFSCREEN_DISTANCE * arrival_x,
-          target_pos.y + ROBOT_OFFSCREEN_DISTANCE * arrival_y,
-        }
-        local delivery_robot =
-          create_cinematic_robot(delivery.target_hub.surface, spawn_pos, delivery.target_hub.force)
-
-        if delivery_robot and delivery_robot.valid then
-          delivery.delivery_robot = delivery_robot
-          delivery.phase = "deliver"
-          delivery.deliver_start_tick = game.tick
-        else
-          -- Failed to create delivery robot, just deliver instantly
-          deliver_items_to_hub(
-            delivery.target_hub,
-            delivery.item_name,
-            delivery.quality_name,
-            delivery.count
-          )
-          table.remove(storage.active_deliveries, i)
-          -- Update overlays for any players viewing this hub
-          refresh_status_for_hub(delivery.target_hub)
-        end
-      end
-    elseif delivery.phase == "deliver" then
-      -- Robot is flying in from off-screen, hovering, then delivering to target hub
-      local deliver_elapsed = game.tick - delivery.deliver_start_tick
-
-      if delivery.delivery_robot and delivery.delivery_robot.valid then
-        local bob = math.sin(game.tick / 10) * 0.2
-        if deliver_elapsed < ROBOT_TRAVEL_TICKS then
-          -- Fly in from the opposite direction toward the target hub
-          local progress = deliver_elapsed / ROBOT_TRAVEL_TICKS
-          local dir_x, dir_y = get_delivery_direction(delivery)
-          local arrival_x = -dir_x
-          local arrival_y = -dir_y
-
-          local target_pos = delivery.target_hub.position
-          local start_x = target_pos.x + ROBOT_OFFSCREEN_DISTANCE * arrival_x
-          local start_y = target_pos.y + ROBOT_OFFSCREEN_DISTANCE * arrival_y
-          local new_x = start_x + (target_pos.x - start_x) * progress
-          local new_y = start_y + (target_pos.y - start_y) * progress + bob
-
-          delivery.delivery_robot.teleport { new_x, new_y }
-        else
-          -- Hover at target hub after arrival (with subtle bobbing)
-          local target_pos = delivery.target_hub.position
-          delivery.delivery_robot.teleport { target_pos.x, target_pos.y + bob }
-        end
-      end
-
-      -- After travel + hover, complete delivery
-      if deliver_elapsed >= (ROBOT_TRAVEL_TICKS + ROBOT_HOVER_TICKS_TARGET) then
-        -- Transfer items to target hub
-        if
-          deliver_items_to_hub(
-            delivery.target_hub,
-            delivery.item_name,
-            delivery.quality_name,
-            delivery.count
-          )
-        then
-          debug_print(
-            string.format(
-              "Interplatform Requests: Delivered %dx %s to %s",
-              delivery.count,
-              delivery.item_name,
-              delivery.target_platform.name
-            )
-          )
-        end
-
-        -- Destroy the delivery robot
-        if delivery.delivery_robot and delivery.delivery_robot.valid then
-          delivery.delivery_robot.destroy()
-        end
-
-        -- Remove from active deliveries
-        table.remove(storage.active_deliveries, i)
-        -- Update overlays for any players viewing this hub
-        refresh_status_for_hub(delivery.target_hub)
-      end
-    end
-
-    ::continue::
   end
 end
 
--- Register the periodic checks
-script.on_nth_tick(SCAN_INTERVAL, process_hub_requests)
-script.on_nth_tick(1, process_deliveries) -- Check deliveries every tick
+-- Register the periodic check — process hub requests and clean up deliveries in a single handler
+script.on_nth_tick(SCAN_INTERVAL, function(event)
+  process_hub_requests()
+  process_deliveries()
+end)
 
 -- Scan and register all existing platform hubs
 function scan_all_hubs()
@@ -1273,21 +1075,6 @@ remote.add_interface("interplatform-requests", {
   end,
   scan_hubs = function()
     scan_all_hubs()
-  end,
-  test_robot = function()
-    local player = game.player
-    if player and player.surface then
-      local robot = create_cinematic_robot(
-        player.surface,
-        { player.position.x + 2, player.position.y },
-        player.force
-      )
-      if robot and robot.valid then
-        debug_print "Test robot created at your position!"
-      else
-        debug_print "Failed to create test robot!"
-      end
-    end
   end,
 })
 
