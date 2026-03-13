@@ -37,6 +37,9 @@ local function init_storage()
   if not storage.request_status then
     storage.request_status = {}
   end
+  if not storage.reserved_items then
+    storage.reserved_items = {}
+  end
   if storage.debug_logging == nil then
     storage.debug_logging = false
   end
@@ -93,6 +96,10 @@ local function on_hub_created(event)
 end
 
 local function on_hub_destroyed(event)
+  -- Clean up reserves for the destroyed hub.
+  if event.entity and event.entity.unit_number and storage.reserved_items then
+    storage.reserved_items[event.entity.unit_number] = nil
+  end
   unregister_hub(event.entity)
 end
 
@@ -156,6 +163,58 @@ local function get_in_transit_for_request(hub, item_name, quality_name)
   end
 
   return total, sources
+end
+
+-- Helper: get the reserve amount for a specific hub+item+quality pair.
+-- Returns the number of items that should be kept on this hub and not
+-- made available for interplatform transfers.
+local function get_reserve_amount(hub_unit_number, item_name, quality_name)
+  if not storage.reserved_items then
+    return 0
+  end
+  local hub_reserves = storage.reserved_items[hub_unit_number]
+  if not hub_reserves then
+    return 0
+  end
+  local key = item_name .. "|" .. (quality_name or "normal")
+  return hub_reserves[key] or 0
+end
+
+-- Helper: set the reserve amount for a specific hub+item+quality pair.
+local function set_reserve_amount(hub_unit_number, item_name, quality_name, amount)
+  if not storage.reserved_items then
+    storage.reserved_items = {}
+  end
+  if not storage.reserved_items[hub_unit_number] then
+    storage.reserved_items[hub_unit_number] = {}
+  end
+  local key = item_name .. "|" .. (quality_name or "normal")
+  if amount and amount > 0 then
+    storage.reserved_items[hub_unit_number][key] = amount
+  else
+    storage.reserved_items[hub_unit_number][key] = nil
+    -- Clean up empty hub table
+    if next(storage.reserved_items[hub_unit_number]) == nil then
+      storage.reserved_items[hub_unit_number] = nil
+    end
+  end
+end
+
+-- Helper: iterate all reserves for a hub. Calls callback(item_name, quality_name, amount).
+local function for_each_reserve(hub_unit_number, callback)
+  if not storage.reserved_items then
+    return
+  end
+  local hub_reserves = storage.reserved_items[hub_unit_number]
+  if not hub_reserves then
+    return
+  end
+  for key, amount in pairs(hub_reserves) do
+    local item_name, quality_name = key:match "^(.+)|(.+)$"
+    if item_name and quality_name and amount > 0 then
+      callback(item_name, quality_name, amount)
+    end
+  end
 end
 
 -- Helper: iterate all logistic filters on a hub that request items from the
@@ -241,68 +300,107 @@ local function show_tech_warning(player)
   frame.location = { 50, 80 }
 end
 
--- When a player opens a space platform hub GUI, show a summary of the
--- Interplatform Requests view for that hub so the player can see the true
--- "on the way" / "available on other platforms" values. This is rendered
--- in a small GUI panel next to the main game UI rather than as chat spam.
-local function on_hub_gui_opened(event)
-  local entity = event.entity
-  if not (entity and entity.valid and entity.name == "space-platform-hub") then
-    return
-  end
+-- Build (or rebuild) the reserves UI inside the given parent flow.
+-- Called separately from the status table so the periodic refresh
+-- doesn't destroy it (which would close any open item picker).
+local function build_reserves_ui(parent_flow, hub)
+  parent_flow.clear()
 
-  -- Ensure storage tables exist even in older saves where on_init may not
-  -- have run with the newer fields yet.
-  init_storage()
-
-  local player = game.get_player(event.player_index)
-  if not player then
-    return
-  end
-
-  -- Only show the Interplatform Requests overlay once the technology is
-  -- researched for this force. If the tech isn't researched, we simply
-  -- skip drawing the overlay (but other events may still show warnings).
-  local force = entity.force
-  local tech = force and force.valid and force.technologies and force.technologies[TECHNOLOGY_NAME]
-  if not (tech and tech.researched) then
-    return
-  end
-
-  local hub = entity
-  local platform = hub.surface and hub.surface.platform
-  if not platform or not platform.valid or not platform.space_location then
-    return
-  end
-
-  -- Clear any previous status panel for this player
-  if player.gui.relative.platform_requests_status then
-    player.gui.relative.platform_requests_status.destroy()
-  end
-
-  local platform_name = (platform and platform.valid and platform.name) or "(unknown platform)"
-
-  local anchor = {
-    gui = defines.relative_gui_type.space_platform_hub_gui,
-    position = defines.relative_gui_position.left,
-  }
-
-  local frame = player.gui.relative.add {
-    type = "frame",
-    name = "platform_requests_status",
-    direction = "vertical",
-    anchor = anchor,
-    caption = "Interplatform Requests",
-  }
-
-  local flow = frame.add { type = "flow", direction = "vertical", name = "content" }
-
-  local innerFrame = flow.add {
+  local reserveFrame = parent_flow.add {
     type = "frame",
     style = "entity_frame",
     direction = "vertical",
   }
 
+  local header_flow = reserveFrame.add { type = "flow", direction = "horizontal" }
+  header_flow.add {
+    type = "label",
+    caption = { "", "[font=default-bold]Reserves[/font]" },
+  }
+  header_flow.add {
+    type = "label",
+    caption = "[img=info]",
+    tooltip = "Reserve items to keep them on this hub.\nReserved amounts will not be sent to other platforms.\n\nLeft-click an item icon to change it.\nRight-click an item icon to remove the reserve.",
+  }
+
+  -- Collect all reserved item names for this hub so we can exclude them from pickers.
+  local reserved_items = {}
+  for_each_reserve(hub.unit_number, function(item_name, quality_name, amount)
+    reserved_items[item_name] = true
+  end)
+
+  -- Show existing reserves as a table
+  local reserve_table = nil
+
+  for_each_reserve(hub.unit_number, function(item_name, quality_name, amount)
+    if not reserve_table then
+      reserve_table = reserveFrame.add {
+        type = "table",
+        name = "platform_reserves_table",
+        column_count = 2,
+      }
+    end
+
+    -- Item button: left-click to change item, right-click to remove.
+    -- Build filters to exclude other already-reserved items.
+    local item_filters = {}
+    for reserved_name, _ in pairs(reserved_items) do
+      if reserved_name ~= item_name then
+        table.insert(
+          item_filters,
+          { filter = "name", name = reserved_name, invert = true, mode = "and" }
+        )
+      end
+    end
+    reserve_table.add {
+      type = "choose-elem-button",
+      name = "ipr_reserve_item__" .. hub.unit_number .. "__" .. item_name .. "__" .. quality_name,
+      elem_type = "item",
+      item = item_name,
+      elem_filters = item_filters,
+      tooltip = "Left-click: change item  Right-click: remove reserve",
+    }
+
+    -- Amount (editable textfield)
+    local field = reserve_table.add {
+      type = "textfield",
+      name = "ipr_reserve_amount__" .. hub.unit_number .. "__" .. item_name .. "__" .. quality_name,
+      text = tostring(amount),
+      numeric = true,
+      allow_decimal = false,
+      allow_negative = false,
+      style = "short_number_textfield",
+    }
+    field.style.width = 60
+  end)
+
+  -- Item picker: selecting an item auto-creates a reserve with amount 1.
+  -- Exclude all already-reserved items from the picker.
+  local picker_filters = {}
+  for reserved_name, _ in pairs(reserved_items) do
+    table.insert(
+      picker_filters,
+      { filter = "name", name = reserved_name, invert = true, mode = "and" }
+    )
+  end
+  local add_flow = reserveFrame.add { type = "flow", direction = "horizontal" }
+  add_flow.add {
+    type = "choose-elem-button",
+    name = "ipr_reserve_pick_item__" .. hub.unit_number,
+    elem_type = "item",
+    elem_filters = picker_filters,
+    tooltip = "Select an item to reserve on this hub",
+  }
+  add_flow.add {
+    type = "label",
+    caption = "[color=gray]Select item to add reserve[/color]",
+  }
+end
+
+-- Build the status table (Need / Satisfaction / In transit / Available / From)
+-- into the given container element. This is called both on initial GUI open
+-- and on periodic refresh.
+local function build_status_table(container, hub, platform)
   -- We'll create the table lazily only if there is at least one row to show.
   local status_table = nil
   local any_missing = false
@@ -314,7 +412,6 @@ local function on_hub_gui_opened(event)
       local quality_name = filter.value.quality or "normal"
       local requested_amount = filter.min or 1
 
-      -- Only show extra info for requests that import from planetary orbit
       local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
       local current_count = 0
       if hub_inventory then
@@ -324,15 +421,9 @@ local function on_hub_gui_opened(event)
         }
       end
 
-      -- Count items already in transit for this hub+item+quality and track
-      -- which platforms they are coming from.
       local in_transit, in_transit_sources =
         get_in_transit_for_request(hub, item_name, quality_name)
 
-      -- Count what is currently available on other platforms at the same
-      -- location. Platforms that have their *own* request for this item
-      -- (importing from planetary orbit) are excluded to avoid circular
-      -- requests.
       local available_on_other_platforms = 0
       local other_platforms = get_platforms_at_location(platform.space_location, platform)
       if #other_platforms > 0 then
@@ -345,24 +436,21 @@ local function on_hub_gui_opened(event)
           then
             local inv = other_hub.get_inventory(defines.inventory.hub_main)
             if inv then
+              local count = inv.get_item_count {
+                name = item_name,
+                quality = quality_name,
+              }
+              local reserve = get_reserve_amount(other_hub.unit_number, item_name, quality_name)
               available_on_other_platforms = available_on_other_platforms
-                + inv.get_item_count {
-                  name = item_name,
-                  quality = quality_name,
-                }
+                + math.max(0, count - reserve)
             end
           end
         end
       end
 
-      -- Treat "need" as based purely on local inventory so that requests
-      -- remain visible until items actually arrive. In-transit items are
-      -- shown separately as W (on_way).
       local total_on_the_way = in_transit
       local still_needed = math.max(0, requested_amount - current_count)
 
-      -- Track simple state machine per (hub, item, quality) so we can
-      -- keep a just-completed request visible for a short time.
       local key = tostring(hub.unit_number) .. "|" .. item_name .. "|" .. quality_name
       storage.request_status = storage.request_status or {}
       local entry = storage.request_status[key]
@@ -387,7 +475,6 @@ local function on_hub_gui_opened(event)
       if now_state == "ACTIVE" then
         show_row = true
       elseif now_state == "SATISFIED" and entry.last_change_tick then
-        -- Keep a completed request visible for a short time.
         if game.tick - entry.last_change_tick <= REQUEST_COMPLETED_DISPLAY_TICKS then
           show_row = true
         end
@@ -396,17 +483,13 @@ local function on_hub_gui_opened(event)
       if show_row then
         any_missing = true
 
-        -- Lazily create the status table and its header row the first
-        -- time we have something to show, so it doesn't appear when
-        -- there are no pending or in-transit items.
         if not status_table then
-          status_table = innerFrame.add {
+          status_table = container.add {
             type = "table",
             name = "platform_requests_status_table",
             column_count = 11,
           }
-          -- Columns: icon | need | satisfaction | in transit | available | from
-          status_table.add { type = "label", caption = "" } -- icon column
+          status_table.add { type = "label", caption = "" }
           status_table.add { type = "label", caption = "[color=gray]|[/color]" }
           status_table.add {
             type = "label",
@@ -434,7 +517,6 @@ local function on_hub_gui_opened(event)
           }
         end
 
-        -- Build a compact table row per item.
         local source_list = {}
         for name, _ in pairs(in_transit_sources) do
           table.insert(source_list, name)
@@ -445,7 +527,6 @@ local function on_hub_gui_opened(event)
           sources_str = "-"
         end
 
-        -- Icon (tooltip shows item name)
         status_table.add {
           type = "sprite",
           sprite = "item/" .. item_name,
@@ -454,7 +535,6 @@ local function on_hub_gui_opened(event)
 
         status_table.add { type = "label", caption = "[color=gray]|[/color]" }
 
-        -- Need (local shortfall only). When Need is 0, show green; otherwise orange.
         local need_color = (still_needed == 0) and "green" or "orange"
         status_table.add {
           type = "label",
@@ -464,8 +544,6 @@ local function on_hub_gui_opened(event)
 
         status_table.add { type = "label", caption = "[color=gray]|[/color]" }
 
-        -- Satisfaction: how many this hub has / how many it needs.
-        -- Color encodes the ratio: red < 50%, yellow 50-99%, green >= 100%.
         local satisfied_count = math.min(current_count, requested_amount)
         local ratio = 0
         if requested_amount > 0 then
@@ -493,7 +571,6 @@ local function on_hub_gui_opened(event)
 
         status_table.add { type = "label", caption = "[color=gray]|[/color]" }
 
-        -- In transit
         status_table.add {
           type = "label",
           caption = (total_on_the_way > 0)
@@ -504,11 +581,6 @@ local function on_hub_gui_opened(event)
 
         status_table.add { type = "label", caption = "[color=gray]|[/color]" }
 
-        -- Available on other platforms.
-        -- Color semantics:
-        --   * 0 available  -> red
-        --   * < need       -> yellow (not enough to cover remaining need)
-        --   * >= need      -> green
         local available_color
         if available_on_other_platforms == 0 then
           available_color = "red"
@@ -530,7 +602,6 @@ local function on_hub_gui_opened(event)
 
         status_table.add { type = "label", caption = "[color=gray]|[/color]" }
 
-        -- From (source platforms)
         status_table.add {
           type = "label",
           caption = (sources_str ~= "-") and string.format("[color=cyan]%s[/color]", sources_str)
@@ -543,20 +614,132 @@ local function on_hub_gui_opened(event)
   end
 
   if not any_missing then
-    flow.add {
+    container.add {
       type = "label",
       caption = "All planetary-orbit imports satisfied",
     }
   end
+end
 
-  -- Remember which hub this player is currently viewing so we can
-  -- refresh the overlay when deliveries change.
+-- When a player opens a space platform hub GUI, show a summary of the
+-- Interplatform Requests view for that hub so the player can see the true
+-- "on the way" / "available on other platforms" values. This is rendered
+-- in a small GUI panel next to the main game UI rather than as chat spam.
+--
+-- The panel structure is:
+--   frame "platform_requests_status"
+--     flow (vertical)
+--       flow "ipr_status_container"   ← cleared & rebuilt every ~1s
+--         frame (entity_frame)        ← status table or "all satisfied" label
+--       flow "ipr_reserves_container" ← only rebuilt on reserve changes
+--         frame (entity_frame)        ← reserves table + item picker
+--
+-- On first open, both containers are built. On periodic refresh, only the
+-- status container is cleared and rebuilt — the reserves container (and any
+-- open item picker) is left untouched.
+local function on_hub_gui_opened(event)
+  local entity = event.entity
+  if not (entity and entity.valid and entity.name == "space-platform-hub") then
+    return
+  end
+
+  init_storage()
+
+  local player = game.get_player(event.player_index)
+  if not player then
+    return
+  end
+
+  local force = entity.force
+  local tech = force and force.valid and force.technologies and force.technologies[TECHNOLOGY_NAME]
+  if not (tech and tech.researched) then
+    return
+  end
+
+  local hub = entity
+  local platform = hub.surface and hub.surface.platform
+  if not platform or not platform.valid or not platform.space_location then
+    return
+  end
+
+  local anchor = {
+    gui = defines.relative_gui_type.space_platform_hub_gui,
+    position = defines.relative_gui_position.left,
+  }
+
+  -- Check if the panel already exists for this player and is for this hub.
+  local frame = player.gui.relative.platform_requests_status
+
+  if frame then
+    local tags = frame.tags
+    if tags and tags.hub_unit_number == hub.unit_number then
+      -- Same hub — just refresh the status table, leave reserves alone.
+      local flow_children = frame.children
+      if flow_children and #flow_children >= 1 then
+        local flow = flow_children[1]
+        if flow and flow.valid then
+          local containers = flow.children
+          if containers and #containers >= 1 and containers[1].valid then
+            containers[1].clear()
+            local innerFrame = containers[1].add {
+              type = "frame",
+              style = "entity_frame",
+              direction = "vertical",
+            }
+            build_status_table(innerFrame, hub, platform)
+
+            -- Ensure reserves container exists.
+            if not containers[2] or not containers[2].valid then
+              local rc = flow.add { type = "flow", direction = "vertical" }
+              build_reserves_ui(rc, hub)
+            end
+
+            if storage.viewed_hub_by_player then
+              storage.viewed_hub_by_player[player.index] = hub.unit_number
+            end
+            return
+          end
+        end
+      end
+    end
+
+    -- Different hub or broken structure — destroy and rebuild.
+    frame.destroy()
+    frame = nil
+  end
+
+  -- Build the full panel from scratch.
+  frame = player.gui.relative.add {
+    type = "frame",
+    name = "platform_requests_status",
+    direction = "vertical",
+    anchor = anchor,
+    caption = "Interplatform Requests",
+    tags = { hub_unit_number = hub.unit_number },
+  }
+
+  local flow = frame.add { type = "flow", direction = "vertical" }
+
+  -- Status container (refreshed every ~1s).
+  local sc = flow.add { type = "flow", direction = "vertical" }
+  local innerFrame = sc.add {
+    type = "frame",
+    style = "entity_frame",
+    direction = "vertical",
+  }
+  build_status_table(innerFrame, hub, platform)
+
+  -- Reserves container (only rebuilt on reserve changes).
+  local rc = flow.add { type = "flow", direction = "vertical" }
+  build_reserves_ui(rc, hub)
+
   if storage.viewed_hub_by_player then
     storage.viewed_hub_by_player[player.index] = hub.unit_number
   end
 end
 
--- Refresh overlays for any players currently viewing this hub
+-- Refresh the status table for any players currently viewing this hub.
+-- Only rebuilds the status portion of the panel; reserves are untouched.
 local function refresh_status_for_hub(hub)
   if not (hub and hub.valid) then
     return
@@ -592,7 +775,26 @@ script.on_event(defines.events.on_space_platform_mined_entity, on_hub_destroyed,
 -- Show request status when opening a platform hub GUI
 script.on_event(defines.events.on_gui_opened, on_hub_gui_opened)
 
--- Handle clicks in our custom tech warning popup
+-- Helper: refresh the hub GUI for a player after a reserve change.
+-- Destroys the entire panel so both status and reserves are rebuilt.
+local function refresh_hub_for_player(player_index)
+  local player = game.get_player(player_index)
+  if player and player.valid then
+    -- Destroy the panel so it's fully rebuilt with updated reserves.
+    if player.gui.relative.platform_requests_status then
+      player.gui.relative.platform_requests_status.destroy()
+    end
+    local opened = player.opened
+    if opened and opened.valid and opened.name == "space-platform-hub" then
+      on_hub_gui_opened {
+        entity = opened,
+        player_index = player_index,
+      }
+    end
+  end
+end
+
+-- Handle clicks in our custom UI
 local function on_gui_click(event)
   local element = event.element
   if not (element and element.valid) then
@@ -609,23 +811,110 @@ local function on_gui_click(event)
       parent = parent.parent
     end
 
-    -- After closing the warning, refresh the hub GUI/overlay if the player
-    -- still has a space platform hub open, so they can immediately see that
-    -- the Planetary Orbit import option was cleared.
-    local player = game.get_player(event.player_index)
-    if player and player.valid then
-      local opened = player.opened
-      if opened and opened.valid and opened.name == "space-platform-hub" then
-        on_hub_gui_opened {
-          entity = opened,
-          player_index = event.player_index,
-        }
-      end
-    end
+    refresh_hub_for_player(event.player_index)
+    return
+  end
+
+  -- Reserve: remove
+  hub_id, item_name, quality_name = element.name:match "^ipr_reserve_remove__(%d+)__(.+)__(.+)$"
+  if hub_id then
+    hub_id = tonumber(hub_id)
+    set_reserve_amount(hub_id, item_name, quality_name, 0)
+    refresh_hub_for_player(event.player_index)
+    return
   end
 end
 
 script.on_event(defines.events.on_gui_click, on_gui_click)
+
+-- Handle Enter key in reserve amount textfields
+local function on_gui_confirmed(event)
+  local element = event.element
+  if not (element and element.valid) then
+    return
+  end
+
+  -- Existing reserve amount field confirmed
+  local hub_id, item_name, quality_name =
+    element.name:match "^ipr_reserve_amount__(%d+)__(.+)__(.+)$"
+  if hub_id then
+    hub_id = tonumber(hub_id)
+    local amount = tonumber(element.text) or 0
+    set_reserve_amount(hub_id, item_name, quality_name, amount)
+    refresh_hub_for_player(event.player_index)
+    return
+  end
+end
+
+script.on_event(defines.events.on_gui_confirmed, on_gui_confirmed)
+
+-- When the player selects an item in the reserve picker, immediately
+-- create a reserve with amount 1 and rebuild the reserves section.
+local function on_gui_elem_changed(event)
+  local element = event.element
+  if not (element and element.valid) then
+    return
+  end
+
+  -- New reserve picker: add a reserve with amount 1.
+  local hub_id = element.name:match "^ipr_reserve_pick_item__(%d+)$"
+  if hub_id then
+    hub_id = tonumber(hub_id)
+    local picked_item = element.elem_value
+    if picked_item and type(picked_item) == "string" and picked_item ~= "" then
+      local existing = get_reserve_amount(hub_id, picked_item, "normal")
+      if existing == 0 then
+        set_reserve_amount(hub_id, picked_item, "normal", 1)
+      end
+      refresh_hub_for_player(event.player_index)
+    end
+    return
+  end
+
+  -- Existing reserve item button: change item (left-click selects new item)
+  -- or clear (right-click clears the button, which sets elem_value to nil).
+  local hub_id2, old_item, old_quality = element.name:match "^ipr_reserve_item__(%d+)__(.+)__(.+)$"
+  if hub_id2 then
+    hub_id2 = tonumber(hub_id2)
+    local new_item = element.elem_value
+    if new_item and type(new_item) == "string" and new_item ~= "" then
+      -- Left-click selected a new item: transfer the reserve amount.
+      if new_item ~= old_item then
+        local old_amount = get_reserve_amount(hub_id2, old_item, old_quality)
+        set_reserve_amount(hub_id2, old_item, old_quality, 0)
+        local existing = get_reserve_amount(hub_id2, new_item, "normal")
+        if existing == 0 then
+          set_reserve_amount(hub_id2, new_item, "normal", old_amount > 0 and old_amount or 1)
+        end
+      end
+    else
+      -- Right-click cleared the button: remove the reserve.
+      set_reserve_amount(hub_id2, old_item, old_quality, 0)
+    end
+    refresh_hub_for_player(event.player_index)
+    return
+  end
+end
+
+script.on_event(defines.events.on_gui_elem_changed, on_gui_elem_changed)
+
+-- Save reserve amount as the user types (no confirm button needed).
+local function on_gui_text_changed(event)
+  local element = event.element
+  if not (element and element.valid) then
+    return
+  end
+
+  local hub_id, item_name, quality_name =
+    element.name:match "^ipr_reserve_amount__(%d+)__(.+)__(.+)$"
+  if hub_id then
+    hub_id = tonumber(hub_id)
+    local amount = tonumber(element.text) or 0
+    set_reserve_amount(hub_id, item_name, quality_name, amount)
+  end
+end
+
+script.on_event(defines.events.on_gui_text_changed, on_gui_text_changed)
 
 -- Clean up the status panel when the GUI is closed
 local function on_gui_closed(event)
@@ -769,7 +1058,10 @@ local function find_item_in_platforms(platforms, item_name, quality_name)
         local inventory = hub.get_inventory(defines.inventory.hub_main)
         if inventory then
           local count = inventory.get_item_count { name = item_name, quality = quality_name }
-          if count > 0 then
+          -- Subtract the reserve amount — items the source hub wants to keep.
+          local reserve = get_reserve_amount(hub.unit_number, item_name, quality_name)
+          local available = count - reserve
+          if available > 0 then
             return hub, inventory
           end
         end
@@ -906,10 +1198,14 @@ local function process_hub_requests()
               end
 
               -- Transfer items via cargo pod
-              local available = source_inventory.get_item_count {
+              local raw_available = source_inventory.get_item_count {
                 name = item_name,
                 quality = quality_name,
               }
+              -- Respect the source hub's reserve — only offer what exceeds it.
+              local source_reserve =
+                get_reserve_amount(source_hub.unit_number, item_name, quality_name)
+              local available = math.max(0, raw_available - source_reserve)
               local to_transfer = math.min(needed, available)
 
               -- Cap each transfer using both the item's stack size and any custom minimum payload.

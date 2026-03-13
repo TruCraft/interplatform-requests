@@ -5,21 +5,20 @@ A Factorio Space Age mod that adds "Planetary Orbit" as a request source for spa
 ## Features
 
 - **New Space Location**: Adds "Planetary Orbit" to the "Import from" grid of buttons in platform hub requests
-- **Robot Delivery Animation**: Watch logistic robots fly between platforms delivering items
+- **Cargo Pod Delivery**: Items are transferred between platforms via cargo pods
 - **Automatic Transfers**: Items are pulled from platform hubs on other platforms at the same orbit
+- **Status Panel**: See request satisfaction, in-transit items, and available items on other platforms at a glance
+- **Item Reserves**: Reserve items on a hub so they won't be sent to other platforms
 - **No New Items**: Uses the existing platform hub request system
-- **Cinematic**: 9-second delivery animation with robots flying off one platform and arriving at another
 
 ## How It Works
 
 When you set a platform hub request with "Planetary Orbit" as the import source:
 
 1. The mod scans other platforms at the same space location
-2. Finds the requested items in their platform hubs
-3. Creates a logistic robot on the source platform
-4. Robot picks up items and flies off screen
-5. Robot appears on the target platform and delivers items
-6. Items are added to the requesting platform's hub
+2. Finds the requested items in their platform hubs (respecting reserves)
+3. Sends a cargo pod from the source platform to deliver items
+4. Items are added to the requesting platform's hub
 
 ## Quick Start
 
@@ -29,7 +28,31 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 4. **Set a request** for an item (e.g., Iron Plate, minimum: 100)
 5. **Select "Planetary Orbit"** from the "Import from" grid of buttons
 6. **Put items in another platform's hub** at the same location
-7. **Watch the robot delivery!** A robot will fly between platforms
+7. Items will transfer automatically via cargo pod
+
+## Status Panel
+
+When you open a platform hub, the Interplatform Requests status panel shows:
+
+- **Need**: How many items are still needed to satisfy the request
+- **Satisfaction**: Current amount / requested amount
+- **In Transit**: Items currently being delivered via cargo pod
+- **Available**: Items available on other platforms at the same location (accounting for reserves)
+- **From**: Which platform the items will come from
+
+The status panel updates automatically every second.
+
+## Reserves
+
+Reserves let you keep a minimum number of items on a hub so they won't be sent to other platforms.
+
+- Open a platform hub to see the **Reserves** section below the status table
+- Click the item picker to add a new reserve
+- Set the amount in the text field (saves automatically as you type)
+- **Left-click** an existing reserve's item icon to change the item
+- **Right-click** an existing reserve's item icon to remove the reserve
+- Reserves are per-hub — each platform hub has its own reserve settings
+- An item can only have one reserve entry per hub
 
 ## Example Setup
 
@@ -40,50 +63,27 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 
 ### Platform B (Provider):
 - Orbiting Nauvis
-- Hub has: 500 Iron Plates
+- Hub has: 500 Iron Plates (with 100 reserved)
 
-**Result**:
-1. A logistic robot appears on Platform B
-2. Robot picks up 80 Iron Plates and flies off screen
-3. Robot appears on Platform A and delivers the items
-4. Platform A now has 100 Iron Plates!
-
-## Delivery Animation Timeline
-
-**Total Time: 9 seconds**
-
-**Source Platform (3 seconds):**
-- Robot appears at source hub
-- Hovers for 1 second (picking up items)
-- Flies off screen in a random direction for 2 seconds (could be left, right, up, down, or diagonal)
-
-**Transit (3 seconds):**
-- No visible robot (items in transit between platforms)
-
-**Target Platform (3 seconds):**
-- Robot appears just off-screen coming from the opposite direction
-- Flies toward hub for 2 seconds
-- Hovers at hub for 1 second (delivering items)
-- Disappears
+**Result**: The mod transfers 80 Iron Plates from Platform B to Platform A via cargo pod, respecting Platform B's 100-item reserve.
 
 ## Key Features
 
 - **Same Orbit Only**: Only transfers between platforms at the exact same space location
 - **Smart Transfer**: Only requests the difference (current + in-transit vs requested)
-- **No Duplicates**: Prevents multiple robots for the same request
-- **Visual Feedback**: Watch robots fly between platforms
+- **Reserve System**: Keep items on a hub for local use
+- **No Duplicates**: Prevents multiple transfers for the same request
 - **Performance Friendly**: Checks every 60 ticks (1 second)
 - **Works Alongside Vanilla**: Normal planet-to-platform logistics still work
 
 ## Technical Details
 
 - **Scan Interval**: 60 ticks (1 second)
-- **Delivery Method**: Logistic robots with teleportation animation
+- **Delivery Method**: Cargo pods
 - **Source**: Platform hubs only
 - **Destination**: Platform hubs only
-- **Transfer Amount**: Exact amount needed (requested - current - in_transit)
+- **Transfer Amount**: Exact amount needed (requested - current - in_transit), capped by available minus reserves
 - **Quality Support**: Yes (matches quality in requests)
-- **Animation**: 9 seconds total (3s pickup, 3s transit, 3s delivery)
 
 ## Compatibility
 
@@ -99,14 +99,6 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 - Transfers **to platform hubs only**
 - One transfer per request per second (performance optimization)
 
-## Future Ideas
-
-- Transfer from other container types on platforms
-- Visual transfer effects
-- Statistics and monitoring
-- Priority system for multiple source platforms
-- Transfer speed settings
-
 ## FAQ
 
 **Q: How do I use this mod?**
@@ -116,7 +108,7 @@ A: Set a platform hub request and select "Planetary Orbit" from the "Import from
 A: It appears in the "Import from" grid of buttons.
 
 **Q: How do I know it's working?**
-A: You'll see messages like "Interplatform Requests: Sending Xx item from Platform A to Platform B" and you'll see a robot flying between platforms.
+A: Open the platform hub to see the status panel showing request satisfaction and in-transit items.
 
 **Q: Can I still request from planets?**
 A: Yes! Just select the planet name instead of "Planetary Orbit". The mod doesn't interfere with normal logistics.
@@ -127,8 +119,8 @@ A: Each request is processed independently. The mod checks all platforms for ava
 **Q: Does it work with quality items?**
 A: Yes! It matches the quality specified in the request.
 
-**Q: Why don't I see a robot?**
-A: Make sure you're watching the correct platform (the one receiving items). The robot flies TO that platform from off-screen, coming from the opposite direction it flew when leaving the source platform.
+**Q: How do I prevent a hub from giving away all its items?**
+A: Use the Reserves feature to specify how many of each item should be kept on the hub.
 
 ## Development & CI
 
