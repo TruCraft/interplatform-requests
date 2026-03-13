@@ -425,7 +425,10 @@ local function build_status_table(container, hub, platform)
         get_in_transit_for_request(hub, item_name, quality_name)
 
       local available_on_other_platforms = 0
-      local other_platforms = get_platforms_at_location(platform.space_location, platform)
+      local other_platforms = platform
+          and platform.space_location
+          and get_platforms_at_location(platform.space_location, platform)
+        or {}
       if #other_platforms > 0 then
         for _, other in ipairs(other_platforms) do
           local other_hub = other.hub
@@ -528,9 +531,12 @@ local function build_status_table(container, hub, platform)
         end
 
         status_table.add {
-          type = "sprite",
-          sprite = "item/" .. item_name,
+          type = "choose-elem-button",
+          elem_type = "item-with-quality",
+          ["item-with-quality"] = { name = item_name, quality = quality_name },
+          locked = true,
           tooltip = item_name,
+          style = "slot_button_in_shallow_frame",
         }
 
         status_table.add { type = "label", caption = "[color=gray]|[/color]" }
@@ -650,17 +656,23 @@ local function on_hub_gui_opened(event)
     return
   end
 
+  -- Helper: destroy any stale panel left over from a previously viewed hub.
+  local function destroy_stale_panel()
+    local frame = player.gui.relative.platform_requests_status
+    if frame then
+      frame.destroy()
+    end
+  end
+
   local force = entity.force
   local tech = force and force.valid and force.technologies and force.technologies[TECHNOLOGY_NAME]
   if not (tech and tech.researched) then
+    destroy_stale_panel()
     return
   end
 
   local hub = entity
   local platform = hub.surface and hub.surface.platform
-  if not platform or not platform.valid or not platform.space_location then
-    return
-  end
 
   local anchor = {
     gui = defines.relative_gui_type.space_platform_hub_gui,

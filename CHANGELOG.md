@@ -1,5 +1,11 @@
 # Interplatform Requests - Changelog
 
+## 0.6.9
+
+- Fix status panel not showing on platforms that are not currently orbiting a planet.
+- Fix stale status panel persisting when switching between hubs with and without the technology researched.
+- Fix item icons in the status table not reflecting item quality.
+
 ## 0.6.8
 
 - Add per-hub item reserve system: reserve items on a hub so they won't be sent to other platforms.
