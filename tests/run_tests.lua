@@ -227,7 +227,6 @@ test("scan_all_hubs initializes storage and registers hubs on platform surfaces"
   -- scan_all_hubs calls init_storage(), so all storage tables should exist
   assert_true(storage.monitored_hubs ~= nil, "monitored_hubs should be initialized")
   assert_true(storage.active_deliveries ~= nil, "active_deliveries should be initialized")
-  assert_true(storage.request_directions ~= nil, "request_directions should be initialized")
   assert_true(storage.viewed_hub_by_player ~= nil, "viewed_hub_by_player should be initialized")
   assert_true(storage.request_status ~= nil, "request_status should be initialized")
   assert_equal(storage.debug_logging, false, "debug_logging should default to false")
@@ -257,74 +256,10 @@ test("script.on_init handler is registered and initializes storage", function()
     "active_deliveries should be initialized on on_init"
   )
   assert_true(
-    storage.request_directions ~= nil,
-    "request_directions should be initialized on on_init"
-  )
-  assert_true(
     storage.viewed_hub_by_player ~= nil,
     "viewed_hub_by_player should be initialized on on_init"
   )
   assert_true(storage.request_status ~= nil, "request_status should be initialized on on_init")
-end)
-
--- ---------------------------------------------------------------------------
--- Tests for create_cinematic_robot
--- ---------------------------------------------------------------------------
-
-test("create_cinematic_robot prefers custom robot when creation succeeds", function()
-  local created = {}
-  local surface = {}
-
-  function surface.create_entity(def)
-    table.insert(created, def)
-    return { valid = true, name = def.name }
-  end
-
-  local robot = create_cinematic_robot(surface, { 0, 0 }, { name = "test-force" })
-
-  assert_equal(#created, 1, "expected exactly one create_entity call")
-  assert_equal(created[1].name, "interplatform-delivery-robot")
-  assert_true(robot ~= nil and robot.valid, "robot should be created and valid")
-  assert_equal(robot.name, "interplatform-delivery-robot")
-end)
-
-test("create_cinematic_robot falls back to logistic robot when custom creation fails", function()
-  local calls = {}
-  local surface = {}
-
-  function surface.create_entity(def)
-    table.insert(calls, def.name)
-    if def.name == "interplatform-delivery-robot" then
-      error "no such entity"
-    else
-      return { valid = true, name = def.name }
-    end
-  end
-
-  local robot = create_cinematic_robot(surface, { 1, 1 }, { name = "test-force" })
-
-  assert_equal(#calls, 2, "expected two create_entity calls (custom then fallback)")
-  assert_equal(calls[1], "interplatform-delivery-robot")
-  assert_equal(calls[2], "logistic-robot")
-  assert_true(robot ~= nil and robot.valid, "fallback robot should be created and valid")
-  assert_equal(robot.name, "logistic-robot")
-end)
-
-test("create_cinematic_robot returns nil when both creations fail", function()
-  local calls = {}
-  local surface = {}
-
-  function surface.create_entity(def)
-    table.insert(calls, def.name)
-    error "all creations fail"
-  end
-
-  local robot = create_cinematic_robot(surface, { 2, 2 }, { name = "test-force" })
-
-  assert_equal(#calls, 2, "expected two create_entity calls even when both fail")
-  assert_equal(calls[1], "interplatform-delivery-robot")
-  assert_equal(calls[2], "logistic-robot")
-  assert_equal(robot, nil, "robot should be nil when both creations fail")
 end)
 
 -- ---------------------------------------------------------------------------

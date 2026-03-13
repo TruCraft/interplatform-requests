@@ -4,7 +4,7 @@ data:extend {
   {
     type = "planet",
     name = "planetary-orbit",
-    icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
+    icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png",
     icon_size = 64,
     order = "z[planetary-orbit]",
     subgroup = "planets",
@@ -14,7 +14,7 @@ data:extend {
     magnitude = 0.1, -- Small size so it doesn't clutter the map
     draw_orbit = false, -- Don't draw an orbital ring
     auto_save_on_first_trip = false,
-    starmap_icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
+    starmap_icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png",
     starmap_icon_size = 64,
     label_orientation = 0.25,
     localised_name = { "space-location-name.planetary-orbit" },
@@ -37,7 +37,7 @@ data:extend {
       {
         type = "unlock-space-location",
         space_location = "planetary-orbit",
-        icon = "__interplatform-requests__/graphics/icons/interplatform-delivery-robot.png",
+        icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png",
         icon_size = 64,
       },
     },
