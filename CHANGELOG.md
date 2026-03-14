@@ -1,5 +1,12 @@
 # Interplatform Requests - Changelog
 
+## 0.7.0
+
+- Fix items being taken from platforms that have their own interplatform request for the same item. Source hubs now only offer surplus above their own requested amount (instead of being skipped entirely or fully exposed).
+- Split status panel into separate Incoming and Outgoing tables, each shown only when relevant.
+- Outgoing table shows item, count, and destination platform for items being sent from this hub.
+- Refresh source hub status panel when deliveries are created and completed.
+
 ## 0.6.9
 
 - Fix status panel not showing on platforms that are not currently orbiting a planet.

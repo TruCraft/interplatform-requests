@@ -103,32 +103,37 @@ local function on_hub_destroyed(event)
   unregister_hub(event.entity)
 end
 
--- Helper: does this platform's hub have its *own* request for the given item
--- (importing from planetary orbit)? Used to avoid circular requests and to
--- exclude those items from being treated as "available" exports.
-local function platform_has_request_for_item(hub, item_name, quality_name)
+-- Helper: get the total amount of an item that a hub is requesting via
+-- interplatform (planetary orbit) imports. Returns 0 if the hub has no
+-- such request. Only planetary orbit requests count — items requested
+-- from planets do not restrict what can be taken.
+local function get_hub_request_amount(hub, item_name, quality_name)
   if not (hub and hub.valid) then
-    return false
+    return 0
   end
 
   local logistic_point = hub.get_logistic_point(defines.logistic_member_index.logistic_container)
   if not logistic_point then
-    return false
+    return 0
   end
 
-  local found = false
+  local total = 0
   for_each_planetary_orbit_item_request(logistic_point, function(filter)
     local f_item = filter.value.name
     local f_quality = filter.value.quality or "normal"
     local requested_amount = filter.min or 0
 
     if f_item == item_name and f_quality == quality_name and requested_amount > 0 then
-      found = true
-      return true -- stop iteration early
+      total = total + requested_amount
     end
   end)
 
-  return found
+  return total
+end
+
+-- Convenience wrapper: does this hub have any interplatform request for the item?
+local function platform_has_request_for_item(hub, item_name, quality_name)
+  return get_hub_request_amount(hub, item_name, quality_name) > 0
 end
 
 -- Helper: cached access to the Planetary Orbit prototype. Wrapped so we only
@@ -163,6 +168,34 @@ local function get_in_transit_for_request(hub, item_name, quality_name)
   end
 
   return total, sources
+end
+
+-- Helper: compute how many items are being sent *from* a given hub for a
+-- specific item+quality pair, and which target platforms they are going to.
+local function get_outgoing_for_item(hub, item_name, quality_name)
+  local total = 0
+  local targets = {}
+
+  if not storage or not storage.active_deliveries then
+    return 0, targets
+  end
+
+  for _, delivery in ipairs(storage.active_deliveries) do
+    if
+      delivery.source_hub == hub
+      and delivery.item_name == item_name
+      and delivery.quality_name == quality_name
+    then
+      total = total + delivery.count
+
+      if delivery.target_platform and delivery.target_platform.valid then
+        local name = delivery.target_platform.name or "(unknown platform)"
+        targets[name] = true
+      end
+    end
+  end
+
+  return total, targets
 end
 
 -- Helper: get the reserve amount for a specific hub+item+quality pair.
@@ -397,232 +430,334 @@ local function build_reserves_ui(parent_flow, hub)
   }
 end
 
--- Build the status table (Need / Satisfaction / In transit / Available / From)
--- into the given container element. This is called both on initial GUI open
--- and on periodic refresh.
-local function build_status_table(container, hub, platform)
-  -- We'll create the table lazily only if there is at least one row to show.
-  local status_table = nil
-  local any_missing = false
+-- Build the incoming requests table (Need / Satisfaction / In transit / Available / From)
+-- into the given container element. Only shown when there are active or
+-- recently-satisfied incoming requests.
+local function build_incoming_table(container, hub, platform)
+  local incoming_table = nil
+  local any_incoming = false
 
   local logistic_point = hub.get_logistic_point(defines.logistic_member_index.logistic_container)
-  if logistic_point then
-    for_each_planetary_orbit_item_request(logistic_point, function(filter)
-      local item_name = filter.value.name
-      local quality_name = filter.value.quality or "normal"
-      local requested_amount = filter.min or 1
+  if not logistic_point then
+    return false
+  end
 
-      local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
-      local current_count = 0
-      if hub_inventory then
-        current_count = hub_inventory.get_item_count {
-          name = item_name,
-          quality = quality_name,
-        }
-      end
+  for_each_planetary_orbit_item_request(logistic_point, function(filter)
+    local item_name = filter.value.name
+    local quality_name = filter.value.quality or "normal"
+    local requested_amount = filter.min or 1
 
-      local in_transit, in_transit_sources =
-        get_in_transit_for_request(hub, item_name, quality_name)
+    local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
+    local current_count = 0
+    if hub_inventory then
+      current_count = hub_inventory.get_item_count {
+        name = item_name,
+        quality = quality_name,
+      }
+    end
 
-      local available_on_other_platforms = 0
-      local other_platforms = platform
-          and platform.space_location
-          and get_platforms_at_location(platform.space_location, platform)
-        or {}
-      if #other_platforms > 0 then
-        for _, other in ipairs(other_platforms) do
-          local other_hub = other.hub
-          if
-            other_hub
-            and other_hub.valid
-            and not platform_has_request_for_item(other_hub, item_name, quality_name)
-          then
-            local inv = other_hub.get_inventory(defines.inventory.hub_main)
-            if inv then
-              local count = inv.get_item_count {
-                name = item_name,
-                quality = quality_name,
-              }
-              local reserve = get_reserve_amount(other_hub.unit_number, item_name, quality_name)
-              available_on_other_platforms = available_on_other_platforms
-                + math.max(0, count - reserve)
-            end
+    local in_transit, in_transit_sources =
+      get_in_transit_for_request(hub, item_name, quality_name)
+
+    local available_on_other_platforms = 0
+    local other_platforms = platform
+        and platform.space_location
+        and get_platforms_at_location(platform.space_location, platform)
+      or {}
+    if #other_platforms > 0 then
+      for _, other in ipairs(other_platforms) do
+        local other_hub = other.hub
+        if other_hub and other_hub.valid then
+          local inv = other_hub.get_inventory(defines.inventory.hub_main)
+          if inv then
+            local count = inv.get_item_count {
+              name = item_name,
+              quality = quality_name,
+            }
+            local reserve = get_reserve_amount(other_hub.unit_number, item_name, quality_name)
+            local requested = get_hub_request_amount(other_hub, item_name, quality_name)
+            available_on_other_platforms = available_on_other_platforms
+              + math.max(0, count - reserve - requested)
           end
         end
       end
+    end
 
-      local total_on_the_way = in_transit
-      local still_needed = math.max(0, requested_amount - current_count)
+    local total_on_the_way = in_transit
+    local still_needed = math.max(0, requested_amount - current_count)
 
-      local key = tostring(hub.unit_number) .. "|" .. item_name .. "|" .. quality_name
-      storage.request_status = storage.request_status or {}
-      local entry = storage.request_status[key]
-      local prev_state = entry and entry.state or "NONE"
-      local now_state
+    local key = tostring(hub.unit_number) .. "|" .. item_name .. "|" .. quality_name
+    storage.request_status = storage.request_status or {}
+    local entry = storage.request_status[key]
+    local prev_state = entry and entry.state or "NONE"
+    local now_state
 
-      if still_needed > 0 or total_on_the_way > 0 then
-        now_state = "ACTIVE"
-      else
-        now_state = "SATISFIED"
-      end
+    if still_needed > 0 or total_on_the_way > 0 then
+      now_state = "ACTIVE"
+    else
+      now_state = "SATISFIED"
+    end
 
-      if not entry then
-        entry = { state = now_state, last_change_tick = game.tick }
-        storage.request_status[key] = entry
-      elseif now_state ~= prev_state then
-        entry.state = now_state
-        entry.last_change_tick = game.tick
-      end
+    if not entry then
+      entry = { state = now_state, last_change_tick = game.tick }
+      storage.request_status[key] = entry
+    elseif now_state ~= prev_state then
+      entry.state = now_state
+      entry.last_change_tick = game.tick
+    end
 
-      local show_row = false
-      if now_state == "ACTIVE" then
+    local show_row = false
+    if now_state == "ACTIVE" then
+      show_row = true
+    elseif now_state == "SATISFIED" and entry.last_change_tick then
+      if game.tick - entry.last_change_tick <= REQUEST_COMPLETED_DISPLAY_TICKS then
         show_row = true
-      elseif now_state == "SATISFIED" and entry.last_change_tick then
-        if game.tick - entry.last_change_tick <= REQUEST_COMPLETED_DISPLAY_TICKS then
-          show_row = true
-        end
+      end
+    end
+
+    if show_row then
+      any_incoming = true
+
+      if not incoming_table then
+        container.add {
+          type = "label",
+          caption = { "", "[font=default-bold]Incoming[/font]" },
+        }
+        incoming_table = container.add {
+          type = "table",
+          name = "platform_requests_incoming_table",
+          column_count = 11,
+        }
+        incoming_table.add { type = "label", caption = "" }
+        incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+        incoming_table.add {
+          type = "label",
+          caption = { "", "[font=default-bold]Need[/font]" },
+        }
+        incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+        incoming_table.add {
+          type = "label",
+          caption = { "", "[font=default-bold]Satisfaction[/font]" },
+        }
+        incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+        incoming_table.add {
+          type = "label",
+          caption = { "", "[font=default-bold]In transit[/font]" },
+        }
+        incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+        incoming_table.add {
+          type = "label",
+          caption = { "", "[font=default-bold]Available[/font]" },
+        }
+        incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+        incoming_table.add {
+          type = "label",
+          caption = { "", "[font=default-bold]From[/font]" },
+        }
       end
 
-      if show_row then
-        any_missing = true
-
-        if not status_table then
-          status_table = container.add {
-            type = "table",
-            name = "platform_requests_status_table",
-            column_count = 11,
-          }
-          status_table.add { type = "label", caption = "" }
-          status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-          status_table.add {
-            type = "label",
-            caption = { "", "[font=default-bold]Need[/font]" },
-          }
-          status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-          status_table.add {
-            type = "label",
-            caption = { "", "[font=default-bold]Satisfaction[/font]" },
-          }
-          status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-          status_table.add {
-            type = "label",
-            caption = { "", "[font=default-bold]In transit[/font]" },
-          }
-          status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-          status_table.add {
-            type = "label",
-            caption = { "", "[font=default-bold]Available[/font]" },
-          }
-          status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-          status_table.add {
-            type = "label",
-            caption = { "", "[font=default-bold]From[/font]" },
-          }
-        end
-
-        local source_list = {}
-        for name, _ in pairs(in_transit_sources) do
-          table.insert(source_list, name)
-        end
-        table.sort(source_list)
-        local sources_str = table.concat(source_list, ", ")
-        if sources_str == "" then
-          sources_str = "-"
-        end
-
-        status_table.add {
-          type = "choose-elem-button",
-          elem_type = "item-with-quality",
-          ["item-with-quality"] = { name = item_name, quality = quality_name },
-          locked = true,
-          tooltip = item_name,
-          style = "slot_button_in_shallow_frame",
-        }
-
-        status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-
-        local need_color = (still_needed == 0) and "green" or "orange"
-        status_table.add {
-          type = "label",
-          caption = string.format("[color=%s]%d[/color]", need_color, still_needed),
-          tooltip = "need: additional items required in this hub to reach the request",
-        }
-
-        status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-
-        local satisfied_count = math.min(current_count, requested_amount)
-        local ratio = 0
-        if requested_amount > 0 then
-          ratio = satisfied_count / requested_amount
-        end
-        local sat_color
-        if ratio >= 1 then
-          sat_color = "green"
-        elseif ratio >= 0.5 then
-          sat_color = "yellow"
-        else
-          sat_color = "red"
-        end
-
-        status_table.add {
-          type = "label",
-          caption = string.format(
-            "[color=%s]%d[/color]/[color=green]%d[/color]",
-            sat_color,
-            satisfied_count,
-            requested_amount
-          ),
-          tooltip = "satisfaction: items in this hub / requested amount (red <50%, yellow 50-99%, green >=100%)",
-        }
-
-        status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-
-        status_table.add {
-          type = "label",
-          caption = (total_on_the_way > 0)
-              and string.format("[color=yellow]%d[/color]", total_on_the_way)
-            or string.format("[color=gray]%d[/color]", total_on_the_way),
-          tooltip = "in transit: items already being delivered by Interplatform Requests",
-        }
-
-        status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-
-        local available_color
-        if available_on_other_platforms == 0 then
-          available_color = "red"
-        elseif still_needed > 0 and available_on_other_platforms < still_needed then
-          available_color = "yellow"
-        else
-          available_color = "green"
-        end
-
-        status_table.add {
-          type = "label",
-          caption = string.format(
-            "[color=%s]%d[/color]",
-            available_color,
-            available_on_other_platforms
-          ),
-          tooltip = "available: items currently stored on other platforms in the same orbit",
-        }
-
-        status_table.add { type = "label", caption = "[color=gray]|[/color]" }
-
-        status_table.add {
-          type = "label",
-          caption = (sources_str ~= "-") and string.format("[color=cyan]%s[/color]", sources_str)
-            or sources_str,
-          tooltip = "Platforms currently sending this item",
-        }
+      local source_list = {}
+      for name, _ in pairs(in_transit_sources) do
+        table.insert(source_list, name)
       end
-      return false
-    end)
+      table.sort(source_list)
+      local sources_str = table.concat(source_list, ", ")
+      if sources_str == "" then
+        sources_str = "-"
+      end
+
+      incoming_table.add {
+        type = "choose-elem-button",
+        elem_type = "item-with-quality",
+        ["item-with-quality"] = { name = item_name, quality = quality_name },
+        locked = true,
+        tooltip = item_name,
+        style = "slot_button_in_shallow_frame",
+      }
+
+      incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+      local need_color = (still_needed == 0) and "green" or "orange"
+      incoming_table.add {
+        type = "label",
+        caption = string.format("[color=%s]%d[/color]", need_color, still_needed),
+        tooltip = "need: additional items required in this hub to reach the request",
+      }
+
+      incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+      local satisfied_count = math.min(current_count, requested_amount)
+      local ratio = 0
+      if requested_amount > 0 then
+        ratio = satisfied_count / requested_amount
+      end
+      local sat_color
+      if ratio >= 1 then
+        sat_color = "green"
+      elseif ratio >= 0.5 then
+        sat_color = "yellow"
+      else
+        sat_color = "red"
+      end
+
+      incoming_table.add {
+        type = "label",
+        caption = string.format(
+          "[color=%s]%d[/color]/[color=green]%d[/color]",
+          sat_color,
+          satisfied_count,
+          requested_amount
+        ),
+        tooltip = "satisfaction: items in this hub / requested amount (red <50%, yellow 50-99%, green >=100%)",
+      }
+
+      incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+      incoming_table.add {
+        type = "label",
+        caption = (total_on_the_way > 0)
+            and string.format("[color=yellow]%d[/color]", total_on_the_way)
+          or string.format("[color=gray]%d[/color]", total_on_the_way),
+        tooltip = "in transit: items already being delivered by Interplatform Requests",
+      }
+
+      incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+      local available_color
+      if available_on_other_platforms == 0 then
+        available_color = "red"
+      elseif still_needed > 0 and available_on_other_platforms < still_needed then
+        available_color = "yellow"
+      else
+        available_color = "green"
+      end
+
+      incoming_table.add {
+        type = "label",
+        caption = string.format(
+          "[color=%s]%d[/color]",
+          available_color,
+          available_on_other_platforms
+        ),
+        tooltip = "available: items currently stored on other platforms in the same orbit",
+      }
+
+      incoming_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+      incoming_table.add {
+        type = "label",
+        caption = (sources_str ~= "-") and string.format("[color=cyan]%s[/color]", sources_str)
+          or sources_str,
+        tooltip = "Platforms currently sending this item",
+      }
+    end
+    return false
+  end)
+
+  return any_incoming
+end
+
+-- Build the outgoing deliveries table (Item / Count / To) into the given
+-- container element. Only shown when this hub is actively sending items.
+local function build_outgoing_table(container, hub)
+  if not storage.active_deliveries then
+    return false
   end
 
-  if not any_missing then
+  -- Collect unique outgoing item+quality pairs for this hub.
+  local outgoing_items = {}
+  local any_outgoing = false
+  for _, delivery in ipairs(storage.active_deliveries) do
+    if delivery.source_hub == hub then
+      local key = delivery.item_name .. "|" .. delivery.quality_name
+      if not outgoing_items[key] then
+        outgoing_items[key] = {
+          item_name = delivery.item_name,
+          quality_name = delivery.quality_name,
+          count = 0,
+          targets = {},
+        }
+      end
+      local entry = outgoing_items[key]
+      entry.count = entry.count + delivery.count
+      if delivery.target_platform and delivery.target_platform.valid then
+        entry.targets[delivery.target_platform.name or "(unknown platform)"] = true
+      end
+      any_outgoing = true
+    end
+  end
+
+  if not any_outgoing then
+    return false
+  end
+
+  container.add {
+    type = "label",
+    caption = { "", "[font=default-bold]Outgoing[/font]" },
+  }
+  local outgoing_table = container.add {
+    type = "table",
+    name = "platform_requests_outgoing_table",
+    column_count = 5,
+  }
+  outgoing_table.add { type = "label", caption = "" }
+  outgoing_table.add { type = "label", caption = "[color=gray]|[/color]" }
+  outgoing_table.add {
+    type = "label",
+    caption = { "", "[font=default-bold]Count[/font]" },
+  }
+  outgoing_table.add { type = "label", caption = "[color=gray]|[/color]" }
+  outgoing_table.add {
+    type = "label",
+    caption = { "", "[font=default-bold]To[/font]" },
+  }
+
+  for _, info in pairs(outgoing_items) do
+    outgoing_table.add {
+      type = "choose-elem-button",
+      elem_type = "item-with-quality",
+      ["item-with-quality"] = { name = info.item_name, quality = info.quality_name },
+      locked = true,
+      tooltip = info.item_name,
+      style = "slot_button_in_shallow_frame",
+    }
+
+    outgoing_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+    outgoing_table.add {
+      type = "label",
+      caption = string.format("[color=yellow]%d[/color]", info.count),
+      tooltip = "Number of items in transit from this hub",
+    }
+
+    outgoing_table.add { type = "label", caption = "[color=gray]|[/color]" }
+
+    local target_list = {}
+    for name, _ in pairs(info.targets) do
+      table.insert(target_list, name)
+    end
+    table.sort(target_list)
+
+    outgoing_table.add {
+      type = "label",
+      caption = string.format("[color=cyan]%s[/color]", table.concat(target_list, ", ")),
+      tooltip = "Platforms this item is being sent to",
+    }
+  end
+
+  return true
+end
+
+-- Build both incoming and outgoing status tables into the given container.
+-- This is called both on initial GUI open and on periodic refresh.
+local function build_status_table(container, hub, platform)
+  local has_incoming = build_incoming_table(container, hub, platform)
+  local has_outgoing = build_outgoing_table(container, hub)
+
+  if not has_incoming and not has_outgoing then
     container.add {
       type = "label",
-      caption = "All planetary-orbit imports satisfied",
+      caption = "No active interplatform transfers",
     }
   end
 end
@@ -1064,18 +1199,17 @@ local function find_item_in_platforms(platforms, item_name, quality_name)
   for _, platform in ipairs(platforms) do
     local hub = platform.hub
     if hub and hub.valid then
-      -- Skip platforms that have their *own* request for this item, to avoid
-      -- circular requests and only treat true surplus as available.
-      if not platform_has_request_for_item(hub, item_name, quality_name) then
-        local inventory = hub.get_inventory(defines.inventory.hub_main)
-        if inventory then
-          local count = inventory.get_item_count { name = item_name, quality = quality_name }
-          -- Subtract the reserve amount — items the source hub wants to keep.
-          local reserve = get_reserve_amount(hub.unit_number, item_name, quality_name)
-          local available = count - reserve
-          if available > 0 then
-            return hub, inventory
-          end
+      local inventory = hub.get_inventory(defines.inventory.hub_main)
+      if inventory then
+        local count = inventory.get_item_count { name = item_name, quality = quality_name }
+        -- Subtract the reserve amount — items the source hub wants to keep.
+        local reserve = get_reserve_amount(hub.unit_number, item_name, quality_name)
+        -- Subtract the hub's own interplatform request — don't take items
+        -- the source hub is itself trying to accumulate.
+        local requested = get_hub_request_amount(hub, item_name, quality_name)
+        local available = count - reserve - requested
+        if available > 0 then
+          return hub, inventory
         end
       end
     end
@@ -1214,10 +1348,13 @@ local function process_hub_requests()
                 name = item_name,
                 quality = quality_name,
               }
-              -- Respect the source hub's reserve — only offer what exceeds it.
+              -- Respect the source hub's reserve and its own interplatform
+              -- request — only offer what exceeds both.
               local source_reserve =
                 get_reserve_amount(source_hub.unit_number, item_name, quality_name)
-              local available = math.max(0, raw_available - source_reserve)
+              local source_requested =
+                get_hub_request_amount(source_hub, item_name, quality_name)
+              local available = math.max(0, raw_available - source_reserve - source_requested)
               local to_transfer = math.min(needed, available)
 
               -- Cap each transfer using both the item's stack size and any custom minimum payload.
@@ -1301,6 +1438,7 @@ local function process_hub_requests()
                 )
 
                 refresh_status_for_hub(hub)
+                refresh_status_for_hub(source_hub)
               else
                 -- Fallback: instant transfer if cargo pod creation fails
                 hub_inventory.insert {
@@ -1361,6 +1499,7 @@ local function process_deliveries()
       )
       table.remove(storage.active_deliveries, i)
       refresh_status_for_hub(delivery.target_hub)
+      refresh_status_for_hub(delivery.source_hub)
     end
   end
 end
