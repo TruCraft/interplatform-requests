@@ -456,8 +456,7 @@ local function build_incoming_table(container, hub, platform)
       }
     end
 
-    local in_transit, in_transit_sources =
-      get_in_transit_for_request(hub, item_name, quality_name)
+    local in_transit, in_transit_sources = get_in_transit_for_request(hub, item_name, quality_name)
 
     local available_on_other_platforms = 0
     local other_platforms = platform
@@ -1352,8 +1351,7 @@ local function process_hub_requests()
               -- request — only offer what exceeds both.
               local source_reserve =
                 get_reserve_amount(source_hub.unit_number, item_name, quality_name)
-              local source_requested =
-                get_hub_request_amount(source_hub, item_name, quality_name)
+              local source_requested = get_hub_request_amount(source_hub, item_name, quality_name)
               local available = math.max(0, raw_available - source_reserve - source_requested)
               local to_transfer = math.min(needed, available)
 
