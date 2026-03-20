@@ -40,6 +40,12 @@ local function init_storage()
   if not storage.reserved_items then
     storage.reserved_items = {}
   end
+  if not storage.hold_until_satisfied then
+    storage.hold_until_satisfied = {}
+  end
+  if not storage.mod_paused_platforms then
+    storage.mod_paused_platforms = {}
+  end
   if storage.debug_logging == nil then
     storage.debug_logging = false
   end
@@ -84,7 +90,14 @@ end
 -- Unregister platform hubs
 local function unregister_hub(entity)
   if entity and entity.unit_number then
-    storage.monitored_hubs[entity.unit_number] = nil
+    local id = entity.unit_number
+    storage.monitored_hubs[id] = nil
+    if storage.hold_until_satisfied then
+      storage.hold_until_satisfied[id] = nil
+    end
+    if storage.mod_paused_platforms then
+      storage.mod_paused_platforms[id] = nil
+    end
   end
 end
 
@@ -134,6 +147,34 @@ end
 -- Convenience wrapper: does this hub have any interplatform request for the item?
 local function platform_has_request_for_item(hub, item_name, quality_name)
   return get_hub_request_amount(hub, item_name, quality_name) > 0
+end
+
+-- Helper: check if all interplatform requests on a hub are satisfied.
+-- Returns true if every planetary-orbit request has enough items in the hub inventory.
+local function all_requests_satisfied(hub)
+  if not (hub and hub.valid) then
+    return true
+  end
+  local logistic_point = hub.get_logistic_point(defines.logistic_member_index.logistic_container)
+  if not logistic_point then
+    return true
+  end
+  local inventory = hub.get_inventory(defines.inventory.hub_main)
+  if not inventory then
+    return true
+  end
+  local satisfied = true
+  for_each_planetary_orbit_item_request(logistic_point, function(filter)
+    local item_name = filter.value.name
+    local quality_name = filter.value.quality or "normal"
+    local requested_amount = filter.min or 1
+    local current = inventory.get_item_count { name = item_name, quality = quality_name }
+    if current < requested_amount then
+      satisfied = false
+      return true -- stop early
+    end
+  end)
+  return satisfied
 end
 
 -- Helper: cached access to the Planetary Orbit prototype. Wrapped so we only
@@ -272,7 +313,7 @@ function for_each_planetary_orbit_item_request(logistic_point, callback)
 
   for section_index = 1, #sections do
     local section = sections[section_index]
-    if section and section.filters then
+    if section and section.active ~= false and section.filters then
       for filter_index, filter in ipairs(section.filters) do
         if
           filter
@@ -374,8 +415,8 @@ local function build_reserves_ui(parent_flow, hub)
       }
     end
 
-    -- Item button: left-click to change item, right-click to remove.
-    -- Build filters to exclude other already-reserved items.
+    -- Item button: left-click to change item/quality, right-click to remove.
+    -- Exclude other already-reserved items from the picker.
     local item_filters = {}
     for reserved_name, _ in pairs(reserved_items) do
       if reserved_name ~= item_name then
@@ -388,8 +429,8 @@ local function build_reserves_ui(parent_flow, hub)
     reserve_table.add {
       type = "choose-elem-button",
       name = "ipr_reserve_item__" .. hub.unit_number .. "__" .. item_name .. "__" .. quality_name,
-      elem_type = "item",
-      item = item_name,
+      elem_type = "item-with-quality",
+      ["item-with-quality"] = { name = item_name, quality = quality_name },
       elem_filters = item_filters,
       tooltip = "Left-click: change item  Right-click: remove reserve",
     }
@@ -420,7 +461,7 @@ local function build_reserves_ui(parent_flow, hub)
   add_flow.add {
     type = "choose-elem-button",
     name = "ipr_reserve_pick_item__" .. hub.unit_number,
-    elem_type = "item",
+    elem_type = "item-with-quality",
     elem_filters = picker_filters,
     tooltip = "Select an item to reserve on this hub",
   }
@@ -456,8 +497,7 @@ local function build_incoming_table(container, hub, platform)
       }
     end
 
-    local in_transit, in_transit_sources =
-      get_in_transit_for_request(hub, item_name, quality_name)
+    local in_transit, in_transit_sources = get_in_transit_for_request(hub, item_name, quality_name)
 
     local available_on_other_platforms = 0
     local other_platforms = platform
@@ -880,6 +920,23 @@ local function on_hub_gui_opened(event)
   local rc = flow.add { type = "flow", direction = "vertical" }
   build_reserves_ui(rc, hub)
 
+  -- "Hold until satisfied" checkbox.
+  local hold_checked = storage.hold_until_satisfied
+      and storage.hold_until_satisfied[hub.unit_number]
+    or false
+  local hold_frame = flow.add {
+    type = "frame",
+    style = "entity_frame",
+    direction = "horizontal",
+  }
+  hold_frame.add {
+    type = "checkbox",
+    name = "ipr_hold_until_satisfied__" .. hub.unit_number,
+    caption = "Hold until requests satisfied",
+    tooltip = "When checked, the platform will be paused while any interplatform request is not fully satisfied.",
+    state = hold_checked,
+  }
+
   if storage.viewed_hub_by_player then
     storage.viewed_hub_by_player[player.index] = hub.unit_number
   end
@@ -1007,12 +1064,10 @@ local function on_gui_elem_changed(event)
   local hub_id = element.name:match "^ipr_reserve_pick_item__(%d+)$"
   if hub_id then
     hub_id = tonumber(hub_id)
-    local picked_item = element.elem_value
-    if picked_item and type(picked_item) == "string" and picked_item ~= "" then
-      local existing = get_reserve_amount(hub_id, picked_item, "normal")
-      if existing == 0 then
-        set_reserve_amount(hub_id, picked_item, "normal", 1)
-      end
+    local picked = element.elem_value
+    if picked and type(picked) == "table" and picked.name and picked.name ~= "" then
+      local quality = picked.quality or "normal"
+      set_reserve_amount(hub_id, picked.name, quality, 1)
       refresh_hub_for_player(event.player_index)
     end
     return
@@ -1023,16 +1078,15 @@ local function on_gui_elem_changed(event)
   local hub_id2, old_item, old_quality = element.name:match "^ipr_reserve_item__(%d+)__(.+)__(.+)$"
   if hub_id2 then
     hub_id2 = tonumber(hub_id2)
-    local new_item = element.elem_value
-    if new_item and type(new_item) == "string" and new_item ~= "" then
+    local picked = element.elem_value
+    if picked and type(picked) == "table" and picked.name and picked.name ~= "" then
       -- Left-click selected a new item: transfer the reserve amount.
-      if new_item ~= old_item then
+      local new_item = picked.name
+      local new_quality = picked.quality or "normal"
+      if new_item ~= old_item or new_quality ~= old_quality then
         local old_amount = get_reserve_amount(hub_id2, old_item, old_quality)
         set_reserve_amount(hub_id2, old_item, old_quality, 0)
-        local existing = get_reserve_amount(hub_id2, new_item, "normal")
-        if existing == 0 then
-          set_reserve_amount(hub_id2, new_item, "normal", old_amount > 0 and old_amount or 1)
-        end
+        set_reserve_amount(hub_id2, new_item, new_quality, old_amount > 0 and old_amount or 1)
       end
     else
       -- Right-click cleared the button: remove the reserve.
@@ -1062,6 +1116,32 @@ local function on_gui_text_changed(event)
 end
 
 script.on_event(defines.events.on_gui_text_changed, on_gui_text_changed)
+
+-- Handle "Hold until requests satisfied" checkbox.
+local function on_gui_checked_state_changed(event)
+  local element = event.element
+  if not (element and element.valid) then
+    return
+  end
+
+  local hub_id = element.name:match "^ipr_hold_until_satisfied__(%d+)$"
+  if hub_id then
+    hub_id = tonumber(hub_id)
+    init_storage()
+    storage.hold_until_satisfied[hub_id] = element.state
+
+    -- If unchecked, immediately unpause if we were the ones who paused it.
+    if not element.state and storage.mod_paused_platforms[hub_id] then
+      storage.mod_paused_platforms[hub_id] = nil
+      local hub_data = storage.monitored_hubs[hub_id]
+      if hub_data and hub_data.platform and hub_data.platform.valid then
+        hub_data.platform.paused = false
+      end
+    end
+  end
+end
+
+script.on_event(defines.events.on_gui_checked_state_changed, on_gui_checked_state_changed)
 
 -- Clean up the status panel when the GUI is closed
 local function on_gui_closed(event)
@@ -1258,6 +1338,12 @@ local function process_hub_requests()
 
     if not hub or not hub.valid then
       storage.monitored_hubs[unit_number] = nil
+      if storage.hold_until_satisfied then
+        storage.hold_until_satisfied[unit_number] = nil
+      end
+      if storage.mod_paused_platforms then
+        storage.mod_paused_platforms[unit_number] = nil
+      end
     else
       local platform = hub_data.platform
       if platform and platform.valid and platform.space_location then
@@ -1352,8 +1438,7 @@ local function process_hub_requests()
               -- request — only offer what exceeds both.
               local source_reserve =
                 get_reserve_amount(source_hub.unit_number, item_name, quality_name)
-              local source_requested =
-                get_hub_request_amount(source_hub, item_name, quality_name)
+              local source_requested = get_hub_request_amount(source_hub, item_name, quality_name)
               local available = math.max(0, raw_available - source_reserve - source_requested)
               local to_transfer = math.min(needed, available)
 
@@ -1467,6 +1552,25 @@ local function process_hub_requests()
       -- players currently viewing it so that completed requests can age out
       -- and disappear after the configured grace period.
       refresh_status_for_hub(hub)
+
+      -- Hold platform if "Hold until requests satisfied" is enabled.
+      if storage.hold_until_satisfied[unit_number] then
+        if all_requests_satisfied(hub) then
+          -- Requests satisfied — unpause if we were the ones who paused it.
+          if storage.mod_paused_platforms[unit_number] then
+            storage.mod_paused_platforms[unit_number] = nil
+            if platform and platform.valid then
+              platform.paused = false
+            end
+          end
+        else
+          -- Requests not yet satisfied — pause the platform if not already paused.
+          if platform and platform.valid and not platform.paused then
+            platform.paused = true
+            storage.mod_paused_platforms[unit_number] = true
+          end
+        end
+      end
     end
   end
 end
