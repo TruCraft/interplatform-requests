@@ -1,5 +1,12 @@
 # Interplatform Requests - Changelog
 
+## 0.7.1
+
+- Reserve item picker now supports quality selection (uses item-with-quality chooser).
+- Deselected request groups (unchecked checkbox) are no longer treated as active interplatform requests.
+- Add "Hold until requests satisfied" per-hub option: pauses the platform while any interplatform request is not fully satisfied, and automatically unpauses once all requests are met. Does not interfere with manual pausing.
+- Expanded test coverage from 5 to 55 tests, covering reserves, request amounts, satisfaction checks, in-transit/outgoing tracking, availability calculations, inactive sections, hold-until-satisfied, and hub cleanup.
+
 ## 0.7.0
 
 - Fix items being taken from platforms that have their own interplatform request for the same item. Source hubs now only offer surplus above their own requested amount (instead of being skipped entirely or fully exposed).

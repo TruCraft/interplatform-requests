@@ -1631,7 +1631,7 @@ function scan_all_hubs()
   )
 end
 
--- Remote interface for testing
+-- Remote interface for testing and external access
 remote.add_interface("interplatform-requests", {
   process_now = function()
     debug_print "Manually triggering platform request processing..."
@@ -1640,6 +1640,16 @@ remote.add_interface("interplatform-requests", {
   scan_hubs = function()
     scan_all_hubs()
   end,
+  -- Exposed for automated testing
+  get_reserve_amount = get_reserve_amount,
+  set_reserve_amount = set_reserve_amount,
+  for_each_reserve = for_each_reserve,
+  get_hub_request_amount = get_hub_request_amount,
+  platform_has_request_for_item = platform_has_request_for_item,
+  all_requests_satisfied = all_requests_satisfied,
+  get_in_transit_for_request = get_in_transit_for_request,
+  get_outgoing_for_item = get_outgoing_for_item,
+  find_item_in_platforms = find_item_in_platforms,
 })
 
 -- Chat command to control debug logging
