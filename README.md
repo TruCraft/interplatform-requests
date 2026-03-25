@@ -1,24 +1,27 @@
 # Interplatform Requests
 
-A Factorio Space Age mod that adds "Planetary Orbit" as a request source for space platforms, allowing platforms to request items from other platforms orbiting the same planet.
+A Factorio Space Age mod that adds per-planet interplatform request sources for space platforms, allowing platforms to request items from other platforms orbiting the same planet.
 
 ## Features
 
-- **New Space Location**: Adds "Planetary Orbit" to the "Import from" grid of buttons in platform hub requests
+- **Per-Planet Request Sources**: Adds one "Interplatform - {Planet}" button per planet to the "Import from" grid in platform hub requests, each with a composited cargo pod + planet icon
 - **Cargo Pod Delivery**: Items are transferred between platforms via cargo pods
 - **Automatic Transfers**: Items are pulled from platform hubs on other platforms at the same orbit
+- **Conflict Prevention**: Two platforms that both request the same item+quality won't transfer that item between each other (pairwise check prevents circular deliveries)
+- **Planet-Scoped Filtering**: Requests only activate when the platform is orbiting the matching planet
 - **Status Panel**: See request satisfaction, in-transit items, and available items on other platforms at a glance
 - **Item Reserves**: Reserve items on a hub so they won't be sent to other platforms
 - **No New Items**: Uses the existing platform hub request system
 
 ## How It Works
 
-When you set a platform hub request with "Planetary Orbit" as the import source:
+When you set a platform hub request with an interplatform source (e.g., "Interplatform - Nauvis"):
 
-1. The mod scans other platforms at the same space location
-2. Finds the requested items in their platform hubs (respecting reserves)
-3. Sends a cargo pod from the source platform to deliver items
-4. Items are added to the requesting platform's hub
+1. The mod checks if the platform is orbiting that planet
+2. Scans other platforms at the same orbit for available items
+3. Skips source platforms that also request the same item+quality (conflict prevention)
+4. Sends a cargo pod from the source platform to deliver items
+5. Items are added to the requesting platform's hub
 
 ## Quick Start
 
@@ -26,7 +29,7 @@ When you set a platform hub request with "Planetary Orbit" as the import source:
 2. **Open a platform hub** on the platform that needs items
 3. **Click the logistics button** to set requests
 4. **Set a request** for an item (e.g., Iron Plate, minimum: 100)
-5. **Select "Planetary Orbit"** from the "Import from" grid of buttons
+5. **Select "Interplatform - Nauvis"** from the "Import from" grid of buttons
 6. **Put items in another platform's hub** at the same location
 7. Items will transfer automatically via cargo pod
 

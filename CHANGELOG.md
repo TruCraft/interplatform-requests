@@ -1,5 +1,15 @@
 # Interplatform Requests - Changelog
 
+## 0.8.0
+
+- **Per-planet interplatform requests**: Replaced the single "Planetary Orbit" request source with one per planet (e.g., "Interplatform - Nauvis", "Interplatform - Vulcanus"). Each button displays a composited cargo pod + planet icon.
+- **Pairwise conflict detection**: The system no longer transfers items between two platforms that both have an active request for the same item and quality. This prevents circular transfers. The check is pairwise — other platforms without the conflicting request can still participate.
+- **Planet-scoped filtering**: Requests are only active when the platform orbits the matching planet. A hub can hold requests for multiple planets; only the one matching the current orbit is evaluated.
+- **Multi-planet request support**: A single hub can define requests scoped to different planets simultaneously. Requests for non-current orbits remain dormant until the platform travels there.
+- **Save migration**: Existing saves using the old "Planetary Orbit" system are automatically migrated to per-planet format based on each platform's current orbit location. In-flight deliveries complete normally.
+- **Mod compatibility**: Per-planet locations are generated dynamically from all planets at data stage, including planets added by other mods.
+- Expanded test coverage from 55 to 72 tests, covering per-planet iteration, conflict detection, planet filtering, migration, and new helper functions.
+
 ## 0.7.1
 
 - Reserve item picker now supports quality selection (uses item-with-quality chooser).

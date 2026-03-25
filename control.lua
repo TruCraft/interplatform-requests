@@ -72,6 +72,11 @@ script.on_configuration_changed(function()
   if scan_all_hubs then
     scan_all_hubs()
   end
+
+  -- Migrate old "Planetary Orbit" requests to per-planet format.
+  if migrate_planetary_orbit_to_per_planet then
+    migrate_planetary_orbit_to_per_planet()
+  end
 end)
 
 -- Register platform hubs
@@ -117,10 +122,9 @@ local function on_hub_destroyed(event)
 end
 
 -- Helper: get the total amount of an item that a hub is requesting via
--- interplatform (planetary orbit) imports. Returns 0 if the hub has no
--- such request. Only planetary orbit requests count — items requested
--- from planets do not restrict what can be taken.
-local function get_hub_request_amount(hub, item_name, quality_name)
+-- interplatform imports. Returns 0 if the hub has no such request.
+-- When planet_name is provided, only counts requests scoped to that planet.
+local function get_hub_request_amount(hub, item_name, quality_name, planet_name)
   if not (hub and hub.valid) then
     return 0
   end
@@ -131,26 +135,34 @@ local function get_hub_request_amount(hub, item_name, quality_name)
   end
 
   local total = 0
-  for_each_planetary_orbit_item_request(logistic_point, function(filter)
-    local f_item = filter.value.name
-    local f_quality = filter.value.quality or "normal"
-    local requested_amount = filter.min or 0
+  for_each_interplatform_item_request(
+    logistic_point,
+    function(filter, section, si, fi, filter_planet)
+      local f_item = filter.value.name
+      local f_quality = filter.value.quality or "normal"
+      local requested_amount = filter.min or 0
 
-    if f_item == item_name and f_quality == quality_name and requested_amount > 0 then
-      total = total + requested_amount
+      if f_item == item_name and f_quality == quality_name and requested_amount > 0 then
+        if not planet_name or filter_planet == planet_name then
+          total = total + requested_amount
+        end
+      end
     end
-  end)
+  )
 
   return total
 end
 
 -- Convenience wrapper: does this hub have any interplatform request for the item?
-local function platform_has_request_for_item(hub, item_name, quality_name)
-  return get_hub_request_amount(hub, item_name, quality_name) > 0
+-- When planet_name is provided, only checks requests scoped to that planet.
+local function platform_has_request_for_item(hub, item_name, quality_name, planet_name)
+  return get_hub_request_amount(hub, item_name, quality_name, planet_name) > 0
 end
 
 -- Helper: check if all interplatform requests on a hub are satisfied.
--- Returns true if every planetary-orbit request has enough items in the hub inventory.
+-- Returns true if every interplatform request that matches the hub's
+-- current orbit has enough items in the hub inventory. Requests scoped
+-- to planets the hub is NOT orbiting are ignored (they cannot block).
 local function all_requests_satisfied(hub)
   if not (hub and hub.valid) then
     return true
@@ -163,8 +175,18 @@ local function all_requests_satisfied(hub)
   if not inventory then
     return true
   end
+
+  -- Determine the platform's current orbit planet name.
+  local platform = hub.surface and hub.surface.platform
+  local current_planet_name = platform and platform.space_location and platform.space_location.name
+
   local satisfied = true
-  for_each_planetary_orbit_item_request(logistic_point, function(filter)
+  for_each_interplatform_item_request(logistic_point, function(filter, section, si, fi, planet_name)
+    -- Skip requests scoped to a different planet — they can't block satisfaction.
+    if planet_name and current_planet_name and planet_name ~= current_planet_name then
+      return false
+    end
+
     local item_name = filter.value.name
     local quality_name = filter.value.quality or "normal"
     local requested_amount = filter.min or 1
@@ -177,10 +199,26 @@ local function all_requests_satisfied(hub)
   return satisfied
 end
 
--- Helper: cached access to the Planetary Orbit prototype. Wrapped so we only
--- have one place to touch if the prototype name or lookup changes later.
-local function get_planetary_orbit_proto()
-  return prototypes.space_location and prototypes.space_location["planetary-orbit"]
+-- Helper: check if a space-location prototype is an interplatform location.
+local function is_interplatform_location(space_location)
+  if not space_location then
+    return false
+  end
+  local name = type(space_location) == "string" and space_location or space_location.name
+  return name and name:sub(1, 14) == "interplatform-"
+end
+
+-- Helper: extract the planet name from an interplatform location name.
+-- e.g. "interplatform-nauvis" -> "nauvis"
+local function get_planet_name_from_interplatform(space_location)
+  if not space_location then
+    return nil
+  end
+  local name = type(space_location) == "string" and space_location or space_location.name
+  if name and name:sub(1, 14) == "interplatform-" then
+    return name:sub(15)
+  end
+  return nil
 end
 
 -- Helper: compute how many items are already in transit to a given hub for a
@@ -291,23 +329,19 @@ local function for_each_reserve(hub_unit_number, callback)
   end
 end
 
--- Helper: iterate all logistic filters on a hub that request items from the
--- Planetary Orbit location. Calls the callback once per matching filter.
+-- Helper: iterate all logistic filters on a hub that request items from any
+-- interplatform-* location. Calls the callback once per matching filter.
 --
--- `callback(filter, section, section_index, filter_index, planetary_orbit_proto)`
+-- `callback(filter, section, section_index, filter_index, planet_name)`
+-- where planet_name is the planet extracted from the interplatform location.
 -- If the callback returns true, iteration stops early.
-function for_each_planetary_orbit_item_request(logistic_point, callback)
+function for_each_interplatform_item_request(logistic_point, callback)
   if not logistic_point then
     return
   end
 
   local sections = logistic_point.sections
   if not sections or #sections == 0 then
-    return
-  end
-
-  local planetary_orbit_proto = get_planetary_orbit_proto()
-  if not planetary_orbit_proto then
     return
   end
 
@@ -319,9 +353,11 @@ function for_each_planetary_orbit_item_request(logistic_point, callback)
           filter
           and filter.value
           and filter.value.type == "item"
-          and filter.import_from == planetary_orbit_proto
+          and filter.import_from
+          and is_interplatform_location(filter.import_from)
         then
-          if callback(filter, section, section_index, filter_index, planetary_orbit_proto) then
+          local planet_name = get_planet_name_from_interplatform(filter.import_from)
+          if callback(filter, section, section_index, filter_index, planet_name) then
             return
           end
         end
@@ -329,6 +365,9 @@ function for_each_planetary_orbit_item_request(logistic_point, callback)
     end
   end
 end
+
+-- Backward-compatible alias for migration/transition
+for_each_planetary_orbit_item_request = for_each_interplatform_item_request
 
 -- When a player opens a space platform hub GUI, show a summary of the
 -- Interplatform Requests view for that hub so the player can see the true
@@ -357,7 +396,7 @@ local function show_tech_warning(player)
     type = "label",
     caption = {
       "",
-      "You must research the Interplatform Requests technology before hub requests can import from Planetary Orbit.",
+      "You must research the Interplatform Requests technology before hub requests can use interplatform imports.",
     },
     style = "label",
   }
@@ -483,10 +522,15 @@ local function build_incoming_table(container, hub, platform)
     return false
   end
 
-  for_each_planetary_orbit_item_request(logistic_point, function(filter)
+  for_each_interplatform_item_request(logistic_point, function(filter, section, si, fi, planet_name)
     local item_name = filter.value.name
     local quality_name = filter.value.quality or "normal"
     local requested_amount = filter.min or 1
+
+    -- Resolve the planet's actual space location for platform lookup.
+    local planet_location = planet_name
+      and prototypes.space_location
+      and prototypes.space_location[planet_name]
 
     local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
     local current_count = 0
@@ -500,9 +544,8 @@ local function build_incoming_table(container, hub, platform)
     local in_transit, in_transit_sources = get_in_transit_for_request(hub, item_name, quality_name)
 
     local available_on_other_platforms = 0
-    local other_platforms = platform
-        and platform.space_location
-        and get_platforms_at_location(platform.space_location, platform)
+    local search_location = planet_location or (platform and platform.space_location)
+    local other_platforms = search_location and get_platforms_at_location(search_location, platform)
       or {}
     if #other_platforms > 0 then
       for _, other in ipairs(other_platforms) do
@@ -515,7 +558,8 @@ local function build_incoming_table(container, hub, platform)
               quality = quality_name,
             }
             local reserve = get_reserve_amount(other_hub.unit_number, item_name, quality_name)
-            local requested = get_hub_request_amount(other_hub, item_name, quality_name)
+            local requested =
+              get_hub_request_amount(other_hub, item_name, quality_name, planet_name)
             available_on_other_platforms = available_on_other_platforms
               + math.max(0, count - reserve - requested)
           end
@@ -1175,13 +1219,7 @@ local function on_logistic_slot_changed(event)
   end
 
   -- If the player is trying to configure a request that imports from
-  -- Planetary Orbit before the tech is researched, show a warning popup.
-  --
-  -- Previously this also *cleared* the import_from setting so that the
-  -- selection "didn't stick" until the tech was researched. That turned out
-  -- to be unfriendly because players often want to preconfigure their hubs
-  -- before unlocking the technology. Now we only show the warning and leave
-  -- the import settings unchanged.
+  -- an interplatform location before the tech is researched, show a warning.
   local player = game.get_player(event.player_index)
   if player then
     local force = entity.force
@@ -1190,34 +1228,31 @@ local function on_logistic_slot_changed(event)
       and force.technologies
       and force.technologies[TECHNOLOGY_NAME]
     if not (tech and tech.researched) then
-      local planetary_orbit_proto = get_planetary_orbit_proto()
-      if planetary_orbit_proto then
-        local logistic_point =
-          entity.get_logistic_point(defines.logistic_member_index.logistic_container)
-        if logistic_point then
-          local sections = logistic_point.sections
-          if sections then
-            local found = false
-            for _, section in ipairs(sections) do
-              if section and section.filters then
-                for _, filter in ipairs(section.filters) do
-                  if
-                    filter
-                    and filter.import_from
-                    and filter.import_from == planetary_orbit_proto
-                  then
-                    found = true
-                    break
-                  end
-                end
-                if found then
+      local logistic_point =
+        entity.get_logistic_point(defines.logistic_member_index.logistic_container)
+      if logistic_point then
+        local sections = logistic_point.sections
+        if sections then
+          local found = false
+          for _, section in ipairs(sections) do
+            if section and section.filters then
+              for _, filter in ipairs(section.filters) do
+                if
+                  filter
+                  and filter.import_from
+                  and is_interplatform_location(filter.import_from)
+                then
+                  found = true
                   break
                 end
               end
+              if found then
+                break
+              end
             end
-            if found then
-              show_tech_warning(player)
-            end
+          end
+          if found then
+            show_tech_warning(player)
           end
         end
       end
@@ -1376,174 +1411,236 @@ local function process_hub_requests()
           local logistic_point =
             hub.get_logistic_point(defines.logistic_member_index.logistic_container)
           if logistic_point then
-            for_each_planetary_orbit_item_request(logistic_point, function(filter)
-              if launches_this_scan >= 1 or active_delivery_count >= MAX_CONCURRENT_TRANSFERS then
-                return true -- stop early for this hub
-              end
-
-              local item_name = filter.value.name
-              local quality_name = filter.value.quality or "normal"
-              local requested_amount = filter.min or 1
-
-              -- Custom minimum payload for this request, if configured in the hub GUI.
-              local min_payload = 0
-              if
-                filter.minimum_delivery_count
-                and type(filter.minimum_delivery_count) == "number"
-                and filter.minimum_delivery_count > 0
-              then
-                min_payload = filter.minimum_delivery_count
-              end
-
-              -- Check current inventory
-              local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
-              if not hub_inventory then
-                return false
-              end
-
-              local current_count = hub_inventory.get_item_count {
-                name = item_name,
-                quality = quality_name,
-              }
-
-              -- Also check if there's already a delivery in progress for this hub/item/quality.
-              local in_transit = select(1, get_in_transit_for_request(hub, item_name, quality_name))
-
-              local total_count = current_count + in_transit
-              local needed = requested_amount - total_count
-
-              -- If we need more, try to get from other platforms, but respect the per-hub
-              -- concurrency limit and rate-limit new launches.
-              if total_count >= requested_amount then
-                return false
-              end
-
-              local other_platforms = get_platforms_at_location(platform.space_location, platform)
-              if #other_platforms == 0 then
-                return false
-              end
-
-              local source_hub, source_inventory =
-                find_item_in_platforms(other_platforms, item_name, quality_name)
-              if not (source_hub and source_inventory) then
-                return false
-              end
-
-              -- Transfer items via cargo pod
-              local raw_available = source_inventory.get_item_count {
-                name = item_name,
-                quality = quality_name,
-              }
-              -- Respect the source hub's reserve and its own interplatform
-              -- request — only offer what exceeds both.
-              local source_reserve =
-                get_reserve_amount(source_hub.unit_number, item_name, quality_name)
-              local source_requested = get_hub_request_amount(source_hub, item_name, quality_name)
-              local available = math.max(0, raw_available - source_reserve - source_requested)
-              local to_transfer = math.min(needed, available)
-
-              -- Cap each transfer using both the item's stack size and any custom minimum payload.
-              local stack_size = get_item_stack_size(item_name)
-              local cap = stack_size
-              if stack_size and stack_size > 0 and min_payload > 0 and min_payload < stack_size then
-                cap = min_payload
-              end
-              if cap and cap > 0 then
-                to_transfer = math.min(to_transfer, cap)
-              end
-
-              -- If a custom minimum payload is set, don't launch a transfer smaller than the
-              -- effective minimum. When the slider is higher than the stack size, we require at
-              -- least one stack and send at most one stack.
-              local effective_min = 0
-              if min_payload > 0 then
-                if stack_size and stack_size > 0 and min_payload > stack_size then
-                  effective_min = stack_size
-                else
-                  effective_min = min_payload
+            for_each_interplatform_item_request(
+              logistic_point,
+              function(filter, section, si, fi, planet_name)
+                if launches_this_scan >= 1 or active_delivery_count >= MAX_CONCURRENT_TRANSFERS then
+                  return true -- stop early for this hub
                 end
-              end
-              if effective_min > 0 and to_transfer < effective_min then
-                return false
-              end
 
-              local removed = source_inventory.remove {
-                name = item_name,
-                quality = quality_name,
-                count = to_transfer,
-              }
+                -- Planet-orbit matching: only process if the hub is orbiting the
+                -- planet this request is scoped to.
+                if planet_name then
+                  local current_planet = platform.space_location and platform.space_location.name
+                  if current_planet ~= planet_name then
+                    debug_print(
+                      string.format(
+                        "Interplatform Requests: Skipping %s request on %s (orbiting %s, not %s)",
+                        filter.value.name,
+                        platform.name,
+                        current_planet or "unknown",
+                        planet_name
+                      )
+                    )
+                    return false -- skip, check next request
+                  end
+                end
 
-              if removed <= 0 then
-                return false
-              end
+                local item_name = filter.value.name
+                local quality_name = filter.value.quality or "normal"
+                local requested_amount = filter.min or 1
 
-              -- Launch a cargo pod from the source hub to the target platform
-              local source_platform = source_hub.surface.platform
-              local pod = source_hub.create_cargo_pod()
+                -- Custom minimum payload for this request, if configured in the hub GUI.
+                local min_payload = 0
+                if
+                  filter.minimum_delivery_count
+                  and type(filter.minimum_delivery_count) == "number"
+                  and filter.minimum_delivery_count > 0
+                then
+                  min_payload = filter.minimum_delivery_count
+                end
 
-              if pod then
-                pod.cargo_pod_destination = {
-                  type = defines.cargo_destination.surface,
-                  surface = hub.surface,
-                  transform_launch_products = false,
+                -- Check current inventory
+                local hub_inventory = hub.get_inventory(defines.inventory.hub_main)
+                if not hub_inventory then
+                  return false
+                end
+
+                local current_count = hub_inventory.get_item_count {
+                  name = item_name,
+                  quality = quality_name,
                 }
 
-                local pod_inventory = pod.get_inventory(defines.inventory.cargo_unit)
-                if pod_inventory then
-                  pod_inventory.insert {
+                -- Also check if there's already a delivery in progress for this hub/item/quality.
+                local in_transit =
+                  select(1, get_in_transit_for_request(hub, item_name, quality_name))
+
+                local total_count = current_count + in_transit
+                local needed = requested_amount - total_count
+
+                -- If we need more, try to get from other platforms, but respect the per-hub
+                -- concurrency limit and rate-limit new launches.
+                if total_count >= requested_amount then
+                  return false
+                end
+
+                -- Resolve the planet's actual space location for platform lookup.
+                local planet_location = planet_name
+                  and prototypes.space_location
+                  and prototypes.space_location[planet_name]
+                local search_location = planet_location or platform.space_location
+                local other_platforms = get_platforms_at_location(search_location, platform)
+                if #other_platforms == 0 then
+                  return false
+                end
+
+                -- Filter out platforms where the source has a conflicting request
+                -- (pairwise conflict detection: skip if source also requests this item+quality+planet).
+                local eligible_platforms = {}
+                for _, other in ipairs(other_platforms) do
+                  local other_hub = other.hub
+                  if other_hub and other_hub.valid then
+                    if
+                      platform_has_request_for_item(other_hub, item_name, quality_name, planet_name)
+                    then
+                      debug_print(
+                        string.format(
+                          "Interplatform Requests: Conflict — %s also requests %s (%s) for %s, skipping",
+                          other.name or "unknown",
+                          item_name,
+                          quality_name,
+                          planet_name or "any"
+                        )
+                      )
+                    else
+                      table.insert(eligible_platforms, other)
+                    end
+                  else
+                    table.insert(eligible_platforms, other)
+                  end
+                end
+
+                if #eligible_platforms == 0 then
+                  return false
+                end
+
+                local source_hub, source_inventory =
+                  find_item_in_platforms(eligible_platforms, item_name, quality_name)
+                if not (source_hub and source_inventory) then
+                  return false
+                end
+
+                -- Transfer items via cargo pod
+                local raw_available = source_inventory.get_item_count {
+                  name = item_name,
+                  quality = quality_name,
+                }
+                -- Respect the source hub's reserve and its own interplatform
+                -- request — only offer what exceeds both.
+                local source_reserve =
+                  get_reserve_amount(source_hub.unit_number, item_name, quality_name)
+                local source_requested = get_hub_request_amount(source_hub, item_name, quality_name)
+                local available = math.max(0, raw_available - source_reserve - source_requested)
+                local to_transfer = math.min(needed, available)
+
+                -- Cap each transfer using both the item's stack size and any custom minimum payload.
+                local stack_size = get_item_stack_size(item_name)
+                local cap = stack_size
+                if
+                  stack_size
+                  and stack_size > 0
+                  and min_payload > 0
+                  and min_payload < stack_size
+                then
+                  cap = min_payload
+                end
+                if cap and cap > 0 then
+                  to_transfer = math.min(to_transfer, cap)
+                end
+
+                -- If a custom minimum payload is set, don't launch a transfer smaller than the
+                -- effective minimum. When the slider is higher than the stack size, we require at
+                -- least one stack and send at most one stack.
+                local effective_min = 0
+                if min_payload > 0 then
+                  if stack_size and stack_size > 0 and min_payload > stack_size then
+                    effective_min = stack_size
+                  else
+                    effective_min = min_payload
+                  end
+                end
+                if effective_min > 0 and to_transfer < effective_min then
+                  return false
+                end
+
+                local removed = source_inventory.remove {
+                  name = item_name,
+                  quality = quality_name,
+                  count = to_transfer,
+                }
+
+                if removed <= 0 then
+                  return false
+                end
+
+                -- Launch a cargo pod from the source hub to the target platform
+                local source_platform = source_hub.surface.platform
+                local pod = source_hub.create_cargo_pod()
+
+                if pod then
+                  pod.cargo_pod_destination = {
+                    type = defines.cargo_destination.surface,
+                    surface = hub.surface,
+                    transform_launch_products = false,
+                  }
+
+                  local pod_inventory = pod.get_inventory(defines.inventory.cargo_unit)
+                  if pod_inventory then
+                    pod_inventory.insert {
+                      name = item_name,
+                      quality = quality_name,
+                      count = removed,
+                    }
+                  end
+
+                  table.insert(storage.active_deliveries, {
+                    cargo_pod = pod,
+                    source_hub = source_hub,
+                    target_hub = hub,
+                    target_platform = platform,
+                    source_platform = source_platform,
+                    start_tick = game.tick,
+                    item_name = item_name,
+                    quality_name = quality_name,
+                    count = removed,
+                  })
+
+                  active_delivery_count = active_delivery_count + 1
+                  launches_this_scan = launches_this_scan + 1
+
+                  debug_print(
+                    string.format(
+                      "Interplatform Requests: Sending %dx %s from %s to %s via cargo pod",
+                      removed,
+                      item_name,
+                      source_platform.name,
+                      platform.name
+                    )
+                  )
+
+                  refresh_status_for_hub(hub)
+                  refresh_status_for_hub(source_hub)
+                else
+                  -- Fallback: instant transfer if cargo pod creation fails
+                  hub_inventory.insert {
                     name = item_name,
                     quality = quality_name,
                     count = removed,
                   }
+                  debug_print(
+                    string.format(
+                      "Interplatform Requests: Transferred %dx %s from %s to %s (instant)",
+                      removed,
+                      item_name,
+                      source_platform.name,
+                      platform.name
+                    )
+                  )
                 end
 
-                table.insert(storage.active_deliveries, {
-                  cargo_pod = pod,
-                  source_hub = source_hub,
-                  target_hub = hub,
-                  target_platform = platform,
-                  source_platform = source_platform,
-                  start_tick = game.tick,
-                  item_name = item_name,
-                  quality_name = quality_name,
-                  count = removed,
-                })
-
-                active_delivery_count = active_delivery_count + 1
-                launches_this_scan = launches_this_scan + 1
-
-                debug_print(
-                  string.format(
-                    "Interplatform Requests: Sending %dx %s from %s to %s via cargo pod",
-                    removed,
-                    item_name,
-                    source_platform.name,
-                    platform.name
-                  )
-                )
-
-                refresh_status_for_hub(hub)
-                refresh_status_for_hub(source_hub)
-              else
-                -- Fallback: instant transfer if cargo pod creation fails
-                hub_inventory.insert {
-                  name = item_name,
-                  quality = quality_name,
-                  count = removed,
-                }
-                debug_print(
-                  string.format(
-                    "Interplatform Requests: Transferred %dx %s from %s to %s (instant)",
-                    removed,
-                    item_name,
-                    source_platform.name,
-                    platform.name
-                  )
-                )
+                return launches_this_scan >= 1
               end
-
-              return launches_this_scan >= 1
-            end)
+            )
           end
         end
       end
@@ -1614,6 +1711,70 @@ script.on_nth_tick(SCAN_INTERVAL, function(event)
   process_deliveries()
 end)
 
+-- Migrate existing saves from the old "Planetary Orbit" system to per-planet
+-- interplatform locations. This runs once on configuration change when an old
+-- save is loaded with the updated mod.
+function migrate_planetary_orbit_to_per_planet()
+  init_storage()
+
+  -- Check if the old planetary-orbit prototype still exists. If it does, we
+  -- don't need to migrate (or migration already happened).
+  local old_proto = prototypes.space_location and prototypes.space_location["planetary-orbit"]
+  if old_proto then
+    return -- old prototype still present, no migration needed
+  end
+
+  local migrated_count = 0
+
+  for unit_number, hub_data in pairs(storage.monitored_hubs) do
+    local hub = hub_data.entity
+    local plat = hub_data.platform
+    if hub and hub.valid and plat and plat.valid and plat.space_location then
+      local current_planet = plat.space_location.name
+      local new_proto = prototypes.space_location
+        and prototypes.space_location["interplatform-" .. current_planet]
+
+      if new_proto then
+        local logistic_point =
+          hub.get_logistic_point(defines.logistic_member_index.logistic_container)
+        if logistic_point and logistic_point.sections then
+          for _, section in ipairs(logistic_point.sections) do
+            if section and section.filters then
+              for fi, filter in ipairs(section.filters) do
+                if
+                  filter
+                  and filter.import_from
+                  and type(filter.import_from) == "table"
+                  and filter.import_from.name == "planetary-orbit"
+                then
+                  filter.import_from = new_proto
+                  migrated_count = migrated_count + 1
+                  debug_print(
+                    string.format(
+                      "Interplatform Requests: Migrated request on hub %d → interplatform-%s",
+                      unit_number,
+                      current_planet
+                    )
+                  )
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  if migrated_count > 0 then
+    debug_print(
+      string.format(
+        "Interplatform Requests: Migration complete — %d request(s) converted to per-planet",
+        migrated_count
+      )
+    )
+  end
+end
+
 -- Scan and register all existing platform hubs
 function scan_all_hubs()
   init_storage()
@@ -1640,6 +1801,9 @@ remote.add_interface("interplatform-requests", {
   scan_hubs = function()
     scan_all_hubs()
   end,
+  migrate = function()
+    migrate_planetary_orbit_to_per_planet()
+  end,
   -- Exposed for automated testing
   get_reserve_amount = get_reserve_amount,
   set_reserve_amount = set_reserve_amount,
@@ -1650,6 +1814,8 @@ remote.add_interface("interplatform-requests", {
   get_in_transit_for_request = get_in_transit_for_request,
   get_outgoing_for_item = get_outgoing_for_item,
   find_item_in_platforms = find_item_in_platforms,
+  is_interplatform_location = is_interplatform_location,
+  get_planet_name_from_interplatform = get_planet_name_from_interplatform,
 })
 
 -- Chat command to control debug logging
