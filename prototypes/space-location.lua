@@ -1,46 +1,78 @@
--- Space location (Planetary Orbit) and its unlocking technology for Interplatform Requests
+-- Per-planet interplatform space locations and unlocking technology
+-- Generates one "interplatform-{planet}" space location per planet in
+-- data.raw["planet"], each with a composited cargo-pod + planet icon.
+
+local cargo_pod_icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png"
+
+-- Collect generated location names so the technology can unlock them all.
+local interplatform_locations = {}
+
+for name, planet in pairs(data.raw["planet"]) do
+  local location_name = "interplatform-" .. name
+
+  -- Build layered icon: planet background + cargo pod foreground.
+  local icons = {}
+  if planet.icon then
+    table.insert(icons, {
+      icon = planet.icon,
+      icon_size = planet.icon_size or 64,
+    })
+  end
+  table.insert(icons, {
+    icon = cargo_pod_icon,
+    icon_size = 64,
+    scale = 0.65,
+    shift = { 0, 0 },
+  })
+
+  data:extend {
+    {
+      type = "space-location",
+      name = location_name,
+      icons = icons,
+      order = "z[interplatform]-" .. (planet.order or name),
+      subgroup = "planets",
+      distance = 0,
+      orientation = 0,
+      gravity_pull = 0,
+      magnitude = 0.1,
+      draw_orbit = false,
+      auto_save_on_first_trip = false,
+      starmap_icon = cargo_pod_icon,
+      starmap_icon_size = 64,
+      label_orientation = 0.25,
+      localised_name = {
+        "",
+        "Interplatform - ",
+        planet.localised_name or { "space-location-name." .. name },
+      },
+      localised_description = { "space-location-description.interplatform" },
+    },
+  }
+
+  table.insert(interplatform_locations, location_name)
+end
+
+-- Build one unlock-space-location effect per generated interplatform location.
+local effects = {}
+for _, loc_name in ipairs(interplatform_locations) do
+  table.insert(effects, {
+    type = "unlock-space-location",
+    space_location = loc_name,
+    icon = cargo_pod_icon,
+    icon_size = 64,
+  })
+end
 
 data:extend {
-  {
-    type = "planet",
-    name = "planetary-orbit",
-    icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png",
-    icon_size = 64,
-    order = "z[planetary-orbit]",
-    subgroup = "planets",
-    distance = 0, -- At the center (no distance from sun)
-    orientation = 0, -- Required field - angle in relation to the sun
-    gravity_pull = 0,
-    magnitude = 0.1, -- Small size so it doesn't clutter the map
-    draw_orbit = false, -- Don't draw an orbital ring
-    auto_save_on_first_trip = false,
-    starmap_icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png",
-    starmap_icon_size = 64,
-    label_orientation = 0.25,
-    localised_name = { "space-location-name.planetary-orbit" },
-    localised_description = { "space-location-description.planetary-orbit" },
-  },
   {
     type = "technology",
     name = "interplatform-requests",
     icon = "__interplatform-requests__/graphics/technology/interplatform-requests.png",
     icon_size = 256,
     essential = true,
-    -- Rely on the Space science pack technology, which itself depends on
-    -- Space platform. This makes Interplatform Requests appear *after*
-    -- Space science pack in the tech tree.
     prerequisites = { "space-science-pack" },
-    -- When researched, this technology unlocks the previously hidden
-    -- "planetary-orbit" space location so that it becomes selectable as an
-    -- import source in platform hub requests.
-    effects = {
-      {
-        type = "unlock-space-location",
-        space_location = "planetary-orbit",
-        icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png",
-        icon_size = 64,
-      },
-    },
+    effects = effects,
     unit = {
       count = 2000,
       ingredients = {

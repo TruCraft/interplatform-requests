@@ -1,9 +1,9 @@
 {
   "name": "interplatform-requests",
-  "version": "0.7",
+  "version": "0.8",
   "title": "Interplatform Requests",
   "author": "jacobtruman",
-  "description": "Adds 'Planetary Orbit' as a request source for space platforms, allowing platforms to request items from other platforms orbiting the same planet",
+  "description": "Adds per-planet interplatform request sources for space platforms, allowing platforms to request items from other platforms orbiting the same planet with conflict prevention",
   "homepage": "https://mods.factorio.com/mod/interplatform-requests",
   "source": "https://github.com/TruCraft/interplatform-requests",
   "factorio_version": "2.0",
