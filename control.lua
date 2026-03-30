@@ -557,7 +557,9 @@ local function build_incoming_table(container, hub, platform)
       for _, other in ipairs(other_platforms) do
         local other_hub = other.hub
         if other_hub and other_hub.valid then
-          if not (storage.do_not_fulfill_from and storage.do_not_fulfill_from[other_hub.unit_number]) then
+          if
+            not (storage.do_not_fulfill_from and storage.do_not_fulfill_from[other_hub.unit_number])
+          then
             local inv = other_hub.get_inventory(defines.inventory.hub_main)
             if inv then
               local count = inv.get_item_count {
@@ -1526,7 +1528,10 @@ local function process_hub_requests()
                 for _, other in ipairs(other_platforms) do
                   local other_hub = other.hub
                   if other_hub and other_hub.valid then
-                    if storage.do_not_fulfill_from and storage.do_not_fulfill_from[other_hub.unit_number] then
+                    if
+                      storage.do_not_fulfill_from
+                      and storage.do_not_fulfill_from[other_hub.unit_number]
+                    then
                       debug_print(
                         string.format(
                           "Interplatform Requests: %s has 'do not fulfill from' enabled, skipping",
