@@ -43,6 +43,9 @@ local function init_storage()
   if not storage.hold_until_satisfied then
     storage.hold_until_satisfied = {}
   end
+  if not storage.do_not_fulfill_from then
+    storage.do_not_fulfill_from = {}
+  end
   if not storage.mod_paused_platforms then
     storage.mod_paused_platforms = {}
   end
@@ -102,6 +105,9 @@ local function unregister_hub(entity)
     end
     if storage.mod_paused_platforms then
       storage.mod_paused_platforms[id] = nil
+    end
+    if storage.do_not_fulfill_from then
+      storage.do_not_fulfill_from[id] = nil
     end
   end
 end
@@ -551,17 +557,19 @@ local function build_incoming_table(container, hub, platform)
       for _, other in ipairs(other_platforms) do
         local other_hub = other.hub
         if other_hub and other_hub.valid then
-          local inv = other_hub.get_inventory(defines.inventory.hub_main)
-          if inv then
-            local count = inv.get_item_count {
-              name = item_name,
-              quality = quality_name,
-            }
-            local reserve = get_reserve_amount(other_hub.unit_number, item_name, quality_name)
-            local requested =
-              get_hub_request_amount(other_hub, item_name, quality_name, planet_name)
-            available_on_other_platforms = available_on_other_platforms
-              + math.max(0, count - reserve - requested)
+          if not (storage.do_not_fulfill_from and storage.do_not_fulfill_from[other_hub.unit_number]) then
+            local inv = other_hub.get_inventory(defines.inventory.hub_main)
+            if inv then
+              local count = inv.get_item_count {
+                name = item_name,
+                quality = quality_name,
+              }
+              local reserve = get_reserve_amount(other_hub.unit_number, item_name, quality_name)
+              local requested =
+                get_hub_request_amount(other_hub, item_name, quality_name, planet_name)
+              available_on_other_platforms = available_on_other_platforms
+                + math.max(0, count - reserve - requested)
+            end
           end
         end
       end
@@ -981,6 +989,23 @@ local function on_hub_gui_opened(event)
     state = hold_checked,
   }
 
+  -- "Do not fulfill from this platform" checkbox.
+  local no_fulfill_checked = storage.do_not_fulfill_from
+      and storage.do_not_fulfill_from[hub.unit_number]
+    or false
+  local no_fulfill_frame = flow.add {
+    type = "frame",
+    style = "entity_frame",
+    direction = "horizontal",
+  }
+  no_fulfill_frame.add {
+    type = "checkbox",
+    name = "ipr_do_not_fulfill_from__" .. hub.unit_number,
+    caption = "Do not fulfill from this platform",
+    tooltip = "When checked, other platforms will not take items from this platform to fulfill their requests.",
+    state = no_fulfill_checked,
+  }
+
   if storage.viewed_hub_by_player then
     storage.viewed_hub_by_player[player.index] = hub.unit_number
   end
@@ -1182,6 +1207,14 @@ local function on_gui_checked_state_changed(event)
         hub_data.platform.paused = false
       end
     end
+    return
+  end
+
+  local no_fulfill_id = element.name:match "^ipr_do_not_fulfill_from__(%d+)$"
+  if no_fulfill_id then
+    no_fulfill_id = tonumber(no_fulfill_id)
+    init_storage()
+    storage.do_not_fulfill_from[no_fulfill_id] = element.state
   end
 end
 
@@ -1379,6 +1412,9 @@ local function process_hub_requests()
       if storage.mod_paused_platforms then
         storage.mod_paused_platforms[unit_number] = nil
       end
+      if storage.do_not_fulfill_from then
+        storage.do_not_fulfill_from[unit_number] = nil
+      end
     else
       local platform = hub_data.platform
       if platform and platform.valid and platform.space_location then
@@ -1490,7 +1526,14 @@ local function process_hub_requests()
                 for _, other in ipairs(other_platforms) do
                   local other_hub = other.hub
                   if other_hub and other_hub.valid then
-                    if
+                    if storage.do_not_fulfill_from and storage.do_not_fulfill_from[other_hub.unit_number] then
+                      debug_print(
+                        string.format(
+                          "Interplatform Requests: %s has 'do not fulfill from' enabled, skipping",
+                          other.name or "unknown"
+                        )
+                      )
+                    elseif
                       platform_has_request_for_item(other_hub, item_name, quality_name, planet_name)
                     then
                       debug_print(
