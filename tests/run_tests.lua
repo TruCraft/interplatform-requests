@@ -528,6 +528,7 @@ test("scan_all_hubs initializes storage and registers hubs on platform surfaces"
   assert_true(storage.request_status ~= nil, "request_status should be initialized")
   assert_true(storage.hold_until_satisfied ~= nil, "hold_until_satisfied should be initialized")
   assert_true(storage.mod_paused_platforms ~= nil, "mod_paused_platforms should be initialized")
+  assert_true(storage.do_not_fulfill_from ~= nil, "do_not_fulfill_from should be initialized")
   assert_equal(storage.debug_logging, false, "debug_logging should default to false")
 
   assert_true(storage.monitored_hubs[1] ~= nil, "hub 1 should be registered")
@@ -564,6 +565,10 @@ test("script.on_init handler is registered and initializes storage", function()
   assert_true(
     storage.mod_paused_platforms ~= nil,
     "mod_paused_platforms should be initialized on on_init"
+  )
+  assert_true(
+    storage.do_not_fulfill_from ~= nil,
+    "do_not_fulfill_from should be initialized on on_init"
   )
 end)
 
@@ -1341,9 +1346,10 @@ test("unregistering hub clears monitored_hubs, hold, and mod_paused entries", fu
 
   assert_true(storage.monitored_hubs[99] ~= nil, "hub should be registered")
 
-  -- Set hold and mod_paused
+  -- Set hold, mod_paused, and do_not_fulfill_from
   storage.hold_until_satisfied[99] = true
   storage.mod_paused_platforms[99] = true
+  storage.do_not_fulfill_from[99] = true
   ipr.set_reserve_amount(99, "iron-plate", "normal", 10)
 
   -- Fire the destruction event
@@ -1363,6 +1369,7 @@ test("unregistering hub clears monitored_hubs, hold, and mod_paused entries", fu
   assert_nil(storage.monitored_hubs[99], "hub should be unregistered")
   assert_nil(storage.hold_until_satisfied[99], "hold should be cleaned up")
   assert_nil(storage.mod_paused_platforms[99], "mod_paused should be cleaned up")
+  assert_nil(storage.do_not_fulfill_from[99], "do_not_fulfill_from should be cleaned up")
 end)
 
 -- ---------------------------------------------------------------------------
@@ -1637,6 +1644,40 @@ test("migration preserves in-flight deliveries", function()
 
   assert_equal(#storage.active_deliveries, 1, "deliveries should be preserved")
   assert_equal(storage.active_deliveries[1].count, 50, "delivery count should be unchanged")
+end)
+
+-- ---------------------------------------------------------------------------
+-- Tests for "do not fulfill from this platform" checkbox
+-- ---------------------------------------------------------------------------
+
+test("do not fulfill from checkbox sets storage", function()
+  reset_storage()
+  local handler = script._events[defines.events.on_gui_checked_state_changed].handler
+  handler {
+    element = {
+      valid = true,
+      name = "ipr_do_not_fulfill_from__42",
+      state = true,
+    },
+    player_index = 1,
+  }
+  assert_true(storage.do_not_fulfill_from[42] == true, "do_not_fulfill_from should be set")
+end)
+
+test("unchecking do not fulfill from clears storage", function()
+  reset_storage()
+  storage.do_not_fulfill_from[42] = true
+
+  local handler = script._events[defines.events.on_gui_checked_state_changed].handler
+  handler {
+    element = {
+      valid = true,
+      name = "ipr_do_not_fulfill_from__42",
+      state = false,
+    },
+    player_index = 1,
+  }
+  assert_true(storage.do_not_fulfill_from[42] == false, "do_not_fulfill_from should be cleared")
 end)
 
 -- ---------------------------------------------------------------------------
