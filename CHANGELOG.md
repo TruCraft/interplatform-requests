@@ -1,5 +1,9 @@
 # Interplatform Requests - Changelog
 
+## 0.8.1
+
+- Add "Do not fulfill from this platform" per-hub checkbox: when enabled, other platforms will not take items from this hub to fulfill their requests. The hub's inventory is also excluded from the "Available" count in the status panel.
+
 ## 0.8.0
 
 - **Per-planet interplatform requests**: Replaced the single "Planetary Orbit" request source with one per planet (e.g., "Interplatform - Nauvis", "Interplatform - Vulcanus"). Each button displays a composited cargo pod + planet icon.
