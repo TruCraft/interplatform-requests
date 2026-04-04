@@ -1,5 +1,10 @@
 # Interplatform Requests - Changelog
 
+## 0.8.3
+
+- Move per-planet interplatform location generation from data stage to data-final-fixes stage so that planets added by other mods are included.
+- Add custom "interplatform" item subgroup so interplatform locations appear on their own row in the space locations list instead of mixed in with planets.
+
 ## 0.8.1
 
 - Add "Do not fulfill from this platform" per-hub checkbox: when enabled, other platforms will not take items from this hub to fulfill their requests. The hub's inventory is also excluded from the "Available" count in the status panel.
