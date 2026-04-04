@@ -4,6 +4,16 @@
 
 local cargo_pod_icon = "__interplatform-requests__/graphics/icons/interplatform-cargo-pod.png"
 
+-- Custom subgroup so interplatform locations appear on their own row.
+data:extend {
+  {
+    type = "item-subgroup",
+    name = "interplatform",
+    group = "space",
+    order = "j-a[interplatform]",
+  },
+}
+
 -- Collect generated location names so the technology can unlock them all.
 local interplatform_locations = {}
 
@@ -31,7 +41,7 @@ for name, planet in pairs(data.raw["planet"]) do
       name = location_name,
       icons = icons,
       order = "z[interplatform]-" .. (planet.order or name),
-      subgroup = "planets",
+      subgroup = "interplatform",
       distance = 0,
       orientation = 0,
       gravity_pull = 0,

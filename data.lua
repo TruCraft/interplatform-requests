@@ -1,4 +1,4 @@
 -- Interplatform Requests - Data Stage
 -- Entry point that wires in all prototype definitions.
-
-require "prototypes.space-location"
+-- NOTE: Per-planet interplatform locations are generated in data-final-fixes.lua
+-- so that planets added by other mods are included.
